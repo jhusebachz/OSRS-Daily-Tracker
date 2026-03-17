@@ -7,7 +7,7 @@ from email.mime.text import MIMEText
 
 USERNAME = "YOUR_RS_USERNAME"
 
-WOM_API = f"https://api.wiseoldman.net/v2/players/{jhusebachz}"
+WOM_API = f"https://api.wiseoldman.net/v2/players/jhusebachz"
 
 DATA_FILE = "data/last_stats.json"
 
