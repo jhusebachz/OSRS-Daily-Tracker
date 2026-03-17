@@ -131,7 +131,7 @@ def compare_to_friends(your_stats, friends_data):
 # AI COACHING
 # =========================
 def generate_ai_coaching(gains, stats, friends_data):
-    import google.generativeai as genai
+    from groq import Groq
 
     goals = goal_progress(stats)
     eta = estimate_eta(gains, stats)
@@ -162,10 +162,13 @@ Friend comparisons (skills where you're winning vs losing):
 
 Give a personalized coaching insight based on this data."""
 
-    genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-    model = genai.GenerativeModel("gemini-2.0-flash")
-    response = model.generate_content(prompt)
-    return response.text
+    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=300
+    )
+    return response.choices[0].message.content
 
 # =========================
 # SUMMARY GENERATION
