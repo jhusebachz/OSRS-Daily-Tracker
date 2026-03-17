@@ -22,12 +22,12 @@ GOAL_MAX_DATE         = date(2027, 3, 15)        # Max by 33rd birthday
 GOAL_RUNEFEST_LEVEL   = 2250                     # Target total level for RuneFest
 MAX_SKILL_LEVEL       = 99
 
-# All 23 skills in OSRS (excluding 'overall')
+# All 24 skills in OSRS (excluding 'overall')
 SKILLS = [
     "attack", "defence", "strength", "hitpoints", "ranged", "prayer",
     "magic", "cooking", "woodcutting", "fletching", "fishing", "firemaking",
     "crafting", "smithing", "mining", "herblore", "agility", "thieving",
-    "slayer", "farming", "runecraft", "hunter", "construction"
+    "slayer", "farming", "runecraft", "hunter", "construction", "sailing"
 ]
 
 EMAIL = os.environ.get("EMAIL_USER")
@@ -188,7 +188,7 @@ def base90_summary(stats, gains):
 
     lines = []
     lines.append(f"=== GOAL 1: Base 90 All Skills (by {GOAL_BASE90_DATE} — {days_left} days left) ===")
-    lines.append(f"Complete: {len(skills_done)}/23 skills at 90+")
+    lines.append(f"Complete: {len(skills_done)}/{len(SKILLS)} skills at 90+")
 
     if skills_remaining:
         skills_remaining.sort(key=lambda x: x[2], reverse=True)
@@ -257,7 +257,7 @@ def max_progress_summary(stats, gains):
 
     lines = []
     lines.append(f"=== GOAL 3: Max Cape by 33rd Birthday ({GOAL_MAX_DATE} — {days_left} days left) ===")
-    lines.append(f"Maxed skills: {len(skills_maxed)}/23")
+    lines.append(f"Maxed skills: {len(skills_maxed)}/{len(SKILLS)}")
 
     if skills_maxed:
         lines.append(f"  Maxed: {', '.join(skills_maxed)}")
@@ -314,14 +314,14 @@ FRIEND XP RACE TODAY:
 {chr(10).join(friend_lines) or 'No friend data available'}
 
 GOAL 1 - Base 90 all skills by {GOAL_BASE90_DATE} ({days_to_base90} days left):
-- Skills still under 90: {len(skills_under_90)}/23
+- Skills still under 90: {len(skills_under_90)}/{len(SKILLS)}
 - Remaining: {', '.join(skills_under_90) if skills_under_90 else 'COMPLETE!'}
 
 GOAL 2 - Total level {GOAL_RUNEFEST_LEVEL} by RuneFest {GOAL_RUNEFEST_DATE} ({days_to_runefest} days left):
 - Current total level: {total_level} (need {max(GOAL_RUNEFEST_LEVEL - total_level, 0)} more levels)
 
 GOAL 3 - Max cape by {GOAL_MAX_DATE} — his 33rd birthday ({days_to_max} days left):
-- Maxed: {len(skills_maxed)}/23 skills at 99
+- Maxed: {len(skills_maxed)}/{len(SKILLS)} skills at 99
 
 Be specific, reference the deadlines, call out the daily XP race, and prioritize whichever goal is most at risk."""
 
