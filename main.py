@@ -1,9 +1,11 @@
 import requests
 import json
 import os
+import time
 from datetime import datetime
 import smtplib
 from email.mime.text import MIMEText
+import anthropic
 
 # =========================
 # CONFIG
@@ -20,8 +22,16 @@ TO_EMAIL = EMAIL
 
 
 # =========================
-# FETCH DATA
+# FETCH & UPDATE DATA
 # =========================
+def update_player(username):
+    url = f"https://api.wiseoldman.net/v2/players/{username}/update"
+    try:
+        requests.post(url)
+    except:
+        pass
+
+
 def fetch_player(username):
     url = f"https://api.wiseoldman.net/v2/players/{username}"
     res = requests.get(url)
@@ -40,6 +50,7 @@ def load_previous():
 
 
 def save_current(stats):
+    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     with open(DATA_FILE, "w") as f:
         json.dump(stats, f)
 
@@ -117,6 +128,48 @@ def compare_to_friends(your_stats, friends_data):
 
 
 # =========================
+# AI COACHING
+# =========================
+def generate_ai_coaching(gains, stats, friends_data):
+    goals = goal_progress(stats)
+    eta = estimate_eta(gains, stats)
+    comparisons = compare_to_friends(stats, friends_data)
+    total_xp = sum(gains.values())
+
+    top_gains = sorted(gains.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_goals = sorted(goals.items(), key=lambda x: x[1], reverse=True)[:5]
+    sorted_eta = sorted(eta.items(), key=lambda x: x[1])[:5]
+
+    prompt = f"""You are a coaching assistant for an Old School RuneScape player.
+Analyze their daily stats and give a short, personalized coaching message (3-5 sentences).
+Be specific, motivating, and reference actual skills and numbers.
+
+Today's total XP gained: {total_xp:,}
+
+Top skill gains today:
+{chr(10).join(f"- {s}: {xp:,} xp" for s, xp in top_gains)}
+
+Progress toward level 90 (top skills):
+{chr(10).join(f"- {s}: {round(pct*100)}%" for s, pct in top_goals)}
+
+Fastest skills to reach 90 (ETA in days):
+{chr(10).join(f"- {s}: {days} days" for s, days in sorted_eta)}
+
+Friend comparisons (skills where you're winning vs losing):
+{chr(10).join(f"- {friend}: Winning {b} / Losing {w}" for friend, (b, w) in comparisons.items())}
+
+Give a personalized coaching insight based on this data."""
+
+    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
+    message = client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=300,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return message.content[0].text
+
+
+# =========================
 # SUMMARY GENERATION
 # =========================
 def generate_summary(gains, stats, friends_data):
@@ -151,14 +204,13 @@ def generate_summary(gains, stats, friends_data):
     for skill, days in sorted_eta:
         msg += f"- {skill}: {days} days\n"
 
-    # Coaching
+    # AI Coaching
     msg += "\nCoaching Insight:\n"
-    if total_xp < 50000:
-        msg += "⚠️ Low output day. Prioritize AFK skills (NMZ, fishing, woodcutting).\n"
-    elif total_xp < 150000:
-        msg += "👍 Solid consistency. Keep stacking gains daily.\n"
-    else:
-        msg += "🔥 High output day. You're closing gaps quickly.\n"
+    try:
+        coaching = generate_ai_coaching(gains, stats, friends_data)
+        msg += coaching + "\n"
+    except Exception as e:
+        msg += f"(Could not generate AI coaching: {e})\n"
 
     return msg
 
@@ -181,20 +233,34 @@ def send_email(message):
 # MAIN
 # =========================
 def main():
+    # Step 1: Force update for all players
+    update_player(USERNAME)
+    for friend in FRIENDS:
+        update_player(friend)
+
+    # Step 2: Wait for WOM to refresh data
+    time.sleep(10)
+
+    # Step 3: Fetch updated stats
     your_stats = fetch_player(USERNAME)
 
     friends_data = {}
     for friend in FRIENDS:
         friends_data[friend] = fetch_player(friend)
 
+    # Step 4: Calculate gains
     previous = load_previous()
     gains = calculate_gains(previous, your_stats)
 
+    # Step 5: Generate report
     summary = generate_summary(gains, your_stats, friends_data)
 
     print(summary)
 
+    # Step 6: Send email
     send_email(summary)
+
+    # Step 7: Save current stats
     save_current(your_stats)
 
 
