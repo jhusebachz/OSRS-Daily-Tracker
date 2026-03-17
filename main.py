@@ -2,10 +2,10 @@ import requests
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, date
 import smtplib
 from email.mime.text import MIMEText
-import anthropic
+from groq import Groq
 
 # =========================
 # CONFIG
@@ -14,7 +14,21 @@ USERNAME = "jhusebachz"
 FRIENDS = ["mufkr", "kingxdabber", "beefmissle13", "hedith"]
 
 DATA_FILE = "data/last_stats.json"
-GOAL_LEVEL = 90
+
+# Personal goals with deadlines
+GOAL_BASE90_DATE      = date(2026, 5, 22)       # Base 90 all skills
+GOAL_RUNEFEST_DATE    = date(2026, 10, 3)        # RuneFest 2026 - total level 2250
+GOAL_MAX_DATE         = date(2027, 3, 15)        # Max by 33rd birthday
+GOAL_RUNEFEST_LEVEL   = 2250                     # Target total level for RuneFest
+MAX_SKILL_LEVEL       = 99
+
+# All 23 skills in OSRS (excluding 'overall')
+SKILLS = [
+    "attack", "defence", "strength", "hitpoints", "ranged", "prayer",
+    "magic", "cooking", "woodcutting", "fletching", "fishing", "firemaking",
+    "crafting", "smithing", "mining", "herblore", "agility", "thieving",
+    "slayer", "farming", "runecraft", "hunter", "construction"
+]
 
 EMAIL = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
@@ -75,35 +89,124 @@ def level_to_xp(level):
     return int(points / 4)
 
 
-def goal_progress(stats):
-    goals = {}
-    goal_xp = level_to_xp(GOAL_LEVEL)
-
-    for skill in stats:
-        current_xp = stats[skill]["experience"]
-        pct = min(current_xp / goal_xp, 1)
-        goals[skill] = pct
-
-    return goals
+def days_until(target_date):
+    return max((target_date - date.today()).days, 1)
 
 
-def estimate_eta(gains, stats):
-    eta = {}
-    goal_xp = level_to_xp(GOAL_LEVEL)
+# =========================
+# GOAL 1: BASE 90
+# =========================
+def base90_summary(stats, gains):
+    goal_xp = level_to_xp(90)
+    days_left = days_until(GOAL_BASE90_DATE)
 
-    for skill in stats:
-        daily_xp = gains.get(skill, 0)
-        if daily_xp <= 0:
+    skills_done = []
+    skills_remaining = []
+
+    for skill in SKILLS:
+        if skill not in stats:
             continue
+        if stats[skill]["level"] >= 90:
+            skills_done.append(skill)
+        else:
+            current_xp = stats[skill]["experience"]
+            remaining_xp = goal_xp - current_xp
+            pct = round(current_xp / goal_xp * 100, 1)
+            daily_xp = gains.get(skill, 0)
+            if daily_xp > 0:
+                eta_str = f"~{round(remaining_xp / daily_xp, 1)}d at current pace"
+            else:
+                eta_str = "no recent xp"
+            skills_remaining.append((skill, stats[skill]["level"], pct, remaining_xp, eta_str))
 
-        remaining = goal_xp - stats[skill]["experience"]
-        if remaining <= 0:
+    lines = []
+    lines.append(f"=== GOAL 1: Base 90 All Skills (by {GOAL_BASE90_DATE} — {days_left} days left) ===")
+    lines.append(f"Complete: {len(skills_done)}/23 skills at 90+")
+
+    if skills_remaining:
+        # Sort by % progress descending (closest to done first)
+        skills_remaining.sort(key=lambda x: x[2], reverse=True)
+        lines.append(f"Still needed ({len(skills_remaining)} skills):")
+        for skill, level, pct, remaining_xp, eta_str in skills_remaining:
+            lines.append(f"  - {skill}: Lv{level} ({pct}%) — {remaining_xp:,} xp needed — {eta_str}")
+    else:
+        lines.append("  ✅ Base 90 complete!")
+
+    return "\n".join(lines)
+
+
+# =========================
+# GOAL 2: TOTAL LEVEL 2250 BY RUNEFEST
+# =========================
+def total_level_summary(stats, gains):
+    days_left = days_until(GOAL_RUNEFEST_DATE)
+    total_level = stats["overall"]["level"] if "overall" in stats else sum(
+        stats[s]["level"] for s in SKILLS if s in stats
+    )
+    levels_needed = max(GOAL_RUNEFEST_LEVEL - total_level, 0)
+
+    lines = []
+    lines.append(f"=== GOAL 2: Total Level {GOAL_RUNEFEST_LEVEL} by RuneFest ({GOAL_RUNEFEST_DATE} — {days_left} days left) ===")
+    lines.append(f"Current total level: {total_level} / {GOAL_RUNEFEST_LEVEL} ({levels_needed} levels to go)")
+
+    if levels_needed <= 0:
+        lines.append("  ✅ RuneFest total level goal achieved!")
+    else:
+        levels_per_day_needed = round(levels_needed / days_left, 2)
+        lines.append(f"Pace needed: {levels_per_day_needed} levels/day to hit {GOAL_RUNEFEST_LEVEL} in time")
+
+        # Show most active skills today
+        active_skills = [
+            (s, gains.get(s, 0)) for s in SKILLS
+            if s in stats and gains.get(s, 0) > 0
+        ]
+        active_skills.sort(key=lambda x: x[1], reverse=True)
+        if active_skills:
+            lines.append("Most active skills today:")
+            for skill, xp in active_skills[:5]:
+                lines.append(f"  - {skill}: +{xp:,} xp (Lv{stats[skill]['level']})")
+
+    return "\n".join(lines)
+
+
+# =========================
+# GOAL 3: MAX BY 33RD BIRTHDAY
+# =========================
+def max_progress_summary(stats, gains):
+    days_left = days_until(GOAL_MAX_DATE)
+    goal_xp = level_to_xp(MAX_SKILL_LEVEL)
+
+    skills_maxed = []
+    skills_remaining = []
+
+    for skill in SKILLS:
+        if skill not in stats:
             continue
+        if stats[skill]["level"] >= MAX_SKILL_LEVEL:
+            skills_maxed.append(skill)
+        else:
+            remaining_xp = goal_xp - stats[skill]["experience"]
+            daily_xp = gains.get(skill, 0)
+            eta_str = f"~{round(remaining_xp / daily_xp, 1)}d at current pace" if daily_xp > 0 else "no recent xp"
+            skills_remaining.append((skill, stats[skill]["level"], remaining_xp, eta_str))
 
-        days = remaining / daily_xp
-        eta[skill] = round(days, 1)
+    lines = []
+    lines.append(f"=== GOAL 3: Max Cape by 33rd Birthday ({GOAL_MAX_DATE} — {days_left} days left) ===")
+    lines.append(f"Maxed skills: {len(skills_maxed)}/23")
 
-    return eta
+    if skills_maxed:
+        lines.append(f"  Maxed: {', '.join(skills_maxed)}")
+
+    if skills_remaining:
+        # Show closest to 99 first
+        skills_remaining.sort(key=lambda x: x[2])
+        lines.append("Closest to 99:")
+        for skill, level, remaining_xp, eta_str in skills_remaining[:5]:
+            lines.append(f"  - {skill}: Lv{level} — {remaining_xp:,} xp to 99 — {eta_str}")
+    else:
+        lines.append("  ✅ Maxed!")
+
+    return "\n".join(lines)
 
 
 # =========================
@@ -111,19 +214,17 @@ def estimate_eta(gains, stats):
 # =========================
 def compare_to_friends(your_stats, friends_data):
     results = {}
-
     for friend, stats in friends_data.items():
         better = 0
         worse = 0
-
-        for skill in your_stats:
+        for skill in SKILLS:
+            if skill not in your_stats or skill not in stats:
+                continue
             if your_stats[skill]["experience"] > stats[skill]["experience"]:
                 better += 1
             else:
                 worse += 1
-
         results[friend] = (better, worse)
-
     return results
 
 
@@ -131,82 +232,91 @@ def compare_to_friends(your_stats, friends_data):
 # AI COACHING
 # =========================
 def generate_ai_coaching(gains, stats, friends_data):
-    from groq import Groq
+    days_to_base90   = days_until(GOAL_BASE90_DATE)
+    days_to_runefest = days_until(GOAL_RUNEFEST_DATE)
+    days_to_max      = days_until(GOAL_MAX_DATE)
 
-    goals = goal_progress(stats)
-    eta = estimate_eta(gains, stats)
-    comparisons = compare_to_friends(stats, friends_data)
     total_xp = sum(gains.values())
+    top_gains = sorted(
+        [(s, gains[s]) for s in SKILLS if s in gains and gains[s] > 0],
+        key=lambda x: x[1], reverse=True
+    )[:5]
 
-    top_gains = sorted(gains.items(), key=lambda x: x[1], reverse=True)[:5]
-    top_goals = sorted(goals.items(), key=lambda x: x[1], reverse=True)[:5]
-    sorted_eta = sorted(eta.items(), key=lambda x: x[1])[:5]
+    skills_under_90 = [s for s in SKILLS if s in stats and stats[s]["level"] < 90]
+    skills_maxed    = [s for s in SKILLS if s in stats and stats[s]["level"] >= 99]
+    total_level     = stats["overall"]["level"] if "overall" in stats else 0
+    comparisons     = compare_to_friends(stats, friends_data)
 
-    prompt = f"""You are a coaching assistant for an Old School RuneScape player.
-Analyze their daily stats and give a short, personalized coaching message (3-5 sentences).
-Be specific, motivating, and reference actual skills and numbers.
+    prompt = f"""You are a coaching assistant for an Old School RuneScape player named jhusebachz.
+They have three personal goals with real deadlines. Write a motivating, personalized coaching message
+(4-6 sentences) that references their actual numbers and which goals are most urgent right now.
 
-Today's total XP gained: {total_xp:,}
+TODAY'S STATS:
+- Total XP gained today: {total_xp:,}
+- Top gains: {', '.join(f"{s} +{xp:,}" for s, xp in top_gains) or 'none today'}
 
-Top skill gains today:
-{chr(10).join(f"- {s}: {xp:,} xp" for s, xp in top_gains)}
+GOAL 1 - Base 90 all skills by {GOAL_BASE90_DATE} ({days_to_base90} days left):
+- Skills still under 90: {len(skills_under_90)}/23
+- Remaining: {', '.join(skills_under_90) if skills_under_90 else 'COMPLETE!'}
 
-Progress toward level 90 (top skills):
-{chr(10).join(f"- {s}: {round(pct*100)}%" for s, pct in top_goals)}
+GOAL 2 - Total level {GOAL_RUNEFEST_LEVEL} by RuneFest {GOAL_RUNEFEST_DATE} ({days_to_runefest} days left):
+- Current total level: {total_level} (need {max(GOAL_RUNEFEST_LEVEL - total_level, 0)} more levels)
 
-Fastest skills to reach 90 (ETA in days):
-{chr(10).join(f"- {s}: {days} days" for s, days in sorted_eta)}
+GOAL 3 - Max cape by {GOAL_MAX_DATE} — his 33rd birthday ({days_to_max} days left):
+- Maxed: {len(skills_maxed)}/23 skills at 99
 
-Friend comparisons (skills where you're winning vs losing):
-{chr(10).join(f"- {friend}: Winning {b} / Losing {w}" for friend, (b, w) in comparisons.items())}
+FRIEND COMPARISONS:
+{chr(10).join(f"- {friend}: Winning {b} skills / Losing {w} skills" for friend, (b, w) in comparisons.items())}
 
-Give a personalized coaching insight based on this data."""
+Be specific, reference the deadlines, and prioritize whichever goal is most at risk."""
 
     client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=300
+        max_tokens=400
     )
     return response.choices[0].message.content
+
 
 # =========================
 # SUMMARY GENERATION
 # =========================
 def generate_summary(gains, stats, friends_data):
     total_xp = sum(gains.values())
-    goals = goal_progress(stats)
-    eta = estimate_eta(gains, stats)
     comparisons = compare_to_friends(stats, friends_data)
 
     msg = f"OSRS Daily Report - {datetime.now().strftime('%Y-%m-%d')}\n\n"
-    msg += f"Total XP Gained: {total_xp:,}\n\n"
+    msg += f"Total XP Gained Today: {total_xp:,}\n\n"
 
     # Top gains
-    top = sorted(gains.items(), key=lambda x: x[1], reverse=True)[:5]
+    top = sorted(
+        [(s, gains[s]) for s in SKILLS if s in gains and gains[s] > 0],
+        key=lambda x: x[1], reverse=True
+    )[:5]
     msg += "Top Gains:\n"
-    for skill, xp in top:
-        msg += f"- {skill}: {xp:,} xp\n"
+    if top:
+        for skill, xp in top:
+            msg += f"  - {skill}: +{xp:,} xp\n"
+    else:
+        msg += "  - No xp gained today\n"
 
     # Friend comparisons
     msg += "\nComparison vs Friends:\n"
     for friend, (better, worse) in comparisons.items():
-        msg += f"- {friend}: Winning {better} / Losing {worse}\n"
+        msg += f"  - {friend}: Winning {better} / Losing {worse}\n"
 
-    # Goal progress
-    msg += "\nProgress to 90:\n"
-    top_goals = sorted(goals.items(), key=lambda x: x[1], reverse=True)[:5]
-    for skill, pct in top_goals:
-        msg += f"- {skill}: {round(pct * 100)}%\n"
+    # Goal 1: Base 90
+    msg += "\n" + base90_summary(stats, gains) + "\n"
 
-    # ETA
-    msg += "\nFastest Skills to 90 (ETA):\n"
-    sorted_eta = sorted(eta.items(), key=lambda x: x[1])[:5]
-    for skill, days in sorted_eta:
-        msg += f"- {skill}: {days} days\n"
+    # Goal 2: RuneFest total level
+    msg += "\n" + total_level_summary(stats, gains) + "\n"
+
+    # Goal 3: Max by birthday
+    msg += "\n" + max_progress_summary(stats, gains) + "\n"
 
     # AI Coaching
-    msg += "\nCoaching Insight:\n"
+    msg += "\n=== Coaching Insight ===\n"
     try:
         coaching = generate_ai_coaching(gains, stats, friends_data)
         msg += coaching + "\n"
