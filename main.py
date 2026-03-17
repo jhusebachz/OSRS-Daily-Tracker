@@ -131,6 +131,8 @@ def compare_to_friends(your_stats, friends_data):
 # AI COACHING
 # =========================
 def generate_ai_coaching(gains, stats, friends_data):
+    import google.generativeai as genai
+
     goals = goal_progress(stats)
     eta = estimate_eta(gains, stats)
     comparisons = compare_to_friends(stats, friends_data)
@@ -160,14 +162,10 @@ Friend comparisons (skills where you're winning vs losing):
 
 Give a personalized coaching insight based on this data."""
 
-    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
-    message = client.messages.create(
-        model="claude-sonnet-4-5",
-        max_tokens=300,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return message.content[0].text
-
+    genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    response = model.generate_content(prompt)
+    return response.text
 
 # =========================
 # SUMMARY GENERATION
