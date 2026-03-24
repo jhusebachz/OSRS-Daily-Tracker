@@ -1,4 +1,2 @@
 requests
-anthropic
-google-generativeai
 groq

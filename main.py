@@ -1,159 +1,194 @@
-import requests
+"""OSRS daily tracker and email report generator.
+
+This script:
+- fetches official hiscores for one primary account and a friend group
+- compares the latest pull against the previously saved snapshot
+- builds an HTML + plain text summary
+- emails the report
+- saves the latest snapshot back to disk
+"""
+
+from __future__ import annotations
+
 import json
 import os
-import time
-from datetime import datetime, date
 import smtplib
-from email.mime.text import MIMEText
+import time
+from datetime import date, datetime
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+import requests
 from groq import Groq
 
-# =========================
-# CONFIG
-# =========================
 
 USERNAME = "jhusebachz"
 FRIENDS = ["mufkr", "kingxdabber", "beefmissle13", "hedith"]
 
 DATA_FILE = "data/last_stats.json"
 
-# Personal goals with deadlines
-GOAL_BASE90_DATE = date(2026, 5, 22)        # Base 90 all skills
-GOAL_RUNEFEST_DATE = date(2026, 10, 3)      # RuneFest 2026 - total level 2250
-GOAL_MAX_DATE = date(2027, 3, 15)           # Max by 33rd birthday
+GOAL_BASE90_DATE = date(2026, 5, 22)
+GOAL_RUNEFEST_DATE = date(2026, 10, 3)
+GOAL_MAX_DATE = date(2027, 3, 15)
 
 GOAL_RUNEFEST_LEVEL = 2250
 MAX_SKILL_LEVEL = 99
 
-# Skill order as returned by the official hiscores CSV API
 HISCORE_SKILLS = [
-    "overall", "attack", "defence", "strength", "hitpoints", "ranged", "prayer",
-    "magic", "cooking", "woodcutting", "fletching", "fishing", "firemaking",
-    "crafting", "smithing", "mining", "herblore", "agility", "thieving",
-    "slayer", "farming", "runecraft", "hunter", "construction", "sailing"
+    "overall",
+    "attack",
+    "defence",
+    "strength",
+    "hitpoints",
+    "ranged",
+    "prayer",
+    "magic",
+    "cooking",
+    "woodcutting",
+    "fletching",
+    "fishing",
+    "firemaking",
+    "crafting",
+    "smithing",
+    "mining",
+    "herblore",
+    "agility",
+    "thieving",
+    "slayer",
+    "farming",
+    "runecraft",
+    "hunter",
+    "construction",
+    "sailing",
 ]
 
-# Skills used for XP gain tracking (excludes 'overall')
-SKILLS = [
-    "attack", "defence", "strength", "hitpoints", "ranged", "prayer",
-    "magic", "cooking", "woodcutting", "fletching", "fishing", "firemaking",
-    "crafting", "smithing", "mining", "herblore", "agility", "thieving",
-    "slayer", "farming", "runecraft", "hunter", "construction", "sailing"
-]
+SKILLS = HISCORE_SKILLS[1:]
 
 EMAIL = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 TO_EMAIL = EMAIL
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# =========================
-# FETCH DATA (Official Hiscores CSV API — no Cloudflare issues)
-# =========================
+HISCORE_HEADERS = {"User-Agent": "OSRS-Daily-Tracker/1.0"}
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 465
 
-def fetch_player(username):
+
+def format_skill_name(skill: str) -> str:
+    if skill == "runecraft":
+        return "Runecraft"
+    return skill.capitalize()
+
+
+def fetch_player(username: str) -> dict:
+    """Fetch one player's official OSRS hiscores from the lite CSV endpoint."""
     safe_name = username.replace(" ", "_")
     url = f"https://secure.runescape.com/m=hiscore_oldschool/index_lite.ws?player={safe_name}"
-    headers = {"User-Agent": "OSRS-Daily-Tracker/1.0"}
-    res = requests.get(url, headers=headers, timeout=10)
-    res.raise_for_status()
+    response = requests.get(url, headers=HISCORE_HEADERS, timeout=10)
+    response.raise_for_status()
 
     stats = {}
-    lines = res.text.strip().split("\n")
-    for i, line in enumerate(lines):
-        if i >= len(HISCORE_SKILLS):
+    lines = response.text.strip().splitlines()
+
+    for index, line in enumerate(lines):
+        if index >= len(HISCORE_SKILLS):
             break
+
         parts = line.strip().split(",")
         if len(parts) < 3:
             continue
-        skill = HISCORE_SKILLS[i]
+
+        skill = HISCORE_SKILLS[index]
         stats[skill] = {
             "rank": int(parts[0]) if parts[0].strip() != "-1" else -1,
             "level": int(parts[1]),
-            "experience": int(parts[2])
+            "experience": int(parts[2]),
         }
+
     return stats
 
-# =========================
-# DATA STORAGE
-# =========================
 
-def load_previous():
+def load_previous() -> dict:
     if not os.path.exists(DATA_FILE):
         return {}
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
 
-def save_current(your_stats, friends_data):
+    with open(DATA_FILE, "r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+def save_current(your_stats: dict, friends_data: dict) -> None:
     os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-    all_stats = {USERNAME: your_stats}
-    for friend, stats in friends_data.items():
-        all_stats[friend] = stats
-    with open(DATA_FILE, "w") as f:
-        json.dump(all_stats, f)
+    all_stats = {USERNAME: your_stats, **friends_data}
 
-# =========================
-# CALCULATIONS
-# =========================
+    with open(DATA_FILE, "w", encoding="utf-8") as file:
+        json.dump(all_stats, file)
 
-def calculate_gains(old_all, username, current_stats):
-    gains = {}
-    old = old_all.get(username) if old_all else None
+
+def calculate_gains(old_all: dict, username: str, current_stats: dict) -> dict[str, int]:
+    gains: dict[str, int] = {}
+    previous_stats = old_all.get(username) if old_all else None
+
     for skill in current_stats:
-        if old and skill in old:
-            gains[skill] = current_stats[skill]["experience"] - old[skill]["experience"]
+        if previous_stats and skill in previous_stats:
+            gains[skill] = current_stats[skill]["experience"] - previous_stats[skill]["experience"]
         else:
             gains[skill] = 0
+
     return gains
 
-def level_to_xp(level):
+
+def level_to_xp(level: int) -> int:
     points = 0
-    for lvl in range(1, level):
-        points += int(lvl + 300 * 2 ** (lvl / 7.0))
+
+    for current_level in range(1, level):
+        points += int(current_level + 300 * 2 ** (current_level / 7.0))
+
     return int(points / 4)
 
-def days_until(target_date):
+
+def days_until(target_date: date) -> int:
     return max((target_date - date.today()).days, 1)
 
-# =========================
-# HTML EMAIL BUILDER HELPERS
-# =========================
 
-def section(title, emoji, content_html):
+def section(title: str, content_html: str) -> str:
     return f"""
 <div style="margin: 24px 0; background: #ffffff; border-radius: 10px;
      border-left: 5px solid #8b5cf6; padding: 16px 20px;
      box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
   <h2 style="margin: 0 0 12px 0; font-size: 15px; font-weight: 700;
       color: #1e1b4b; text-transform: uppercase; letter-spacing: 0.05em;">
-    {emoji}&nbsp; {title}
+    {title}
   </h2>
   {content_html}
 </div>"""
 
-def row(label, value, muted=False):
+
+def row(label: str, value: str, muted: bool = False) -> str:
     color = "#6b7280" if muted else "#111827"
     return f"""<tr>
   <td style="padding: 4px 0; color: #6b7280; font-size: 13px; width: 55%;">{label}</td>
   <td style="padding: 4px 0; color: {color}; font-size: 13px; font-weight: 600; text-align: right;">{value}</td>
 </tr>"""
 
-def pill(text, color="#8b5cf6"):
-    return (f'<span style="display:inline-block; background:{color}; color:#fff; '
-            f'border-radius:999px; padding:2px 10px; font-size:12px; '
-            f'font-weight:600; margin: 2px 3px;">{text}</span>')
 
-def progress_bar(pct, color="#8b5cf6"):
-    pct = min(max(pct, 0), 100)
+def pill(text: str, color: str = "#8b5cf6") -> str:
+    return (
+        f'<span style="display:inline-block; background:{color}; color:#fff; '
+        f'border-radius:999px; padding:2px 10px; font-size:12px; '
+        f'font-weight:600; margin: 2px 3px;">{text}</span>'
+    )
+
+
+def progress_bar(percent: float, color: str = "#8b5cf6") -> str:
+    clamped = min(max(percent, 0), 100)
     return f"""
 <div style="background:#e5e7eb; border-radius:999px; height:8px; margin: 3px 0 8px 0;">
-  <div style="background:{color}; width:{pct}%; height:8px; border-radius:999px;"></div>
+  <div style="background:{color}; width:{clamped}%; height:8px; border-radius:999px;"></div>
 </div>"""
 
-# =========================
-# FRIEND COMPARISON SECTION
-# =========================
 
-def friend_comparison_html(your_gains, friends_data, previous_all):
-    your_total_xp = sum(v for k, v in your_gains.items() if k in SKILLS)
+def friend_comparison_html(your_gains: dict, friends_data: dict, previous_all: dict) -> str:
+    your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
 
     rows_html = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
@@ -167,29 +202,31 @@ def friend_comparison_html(your_gains, friends_data, previous_all):
             continue
 
         friend_gains = calculate_gains(previous_all, friend, friends_data[friend])
-        friend_total_xp = sum(v for k, v in friend_gains.items() if k in SKILLS)
+        friend_total_xp = sum(value for skill, value in friend_gains.items() if skill in SKILLS)
         diff = your_total_xp - friend_total_xp
 
         if diff > 0:
-            badge = pill(f"You +{diff:,} xp ahead", "#16a34a")
+            badge = pill(f"Ahead by {diff:,} xp", "#16a34a")
         elif diff < 0:
-            badge = pill(f"They +{abs(diff):,} xp ahead", "#dc2626")
+            badge = pill(f"Trailing by {abs(diff):,} xp", "#dc2626")
         else:
             badge = pill("Dead even", "#d97706")
 
-        top3 = sorted(
-            [(s, friend_gains[s]) for s in SKILLS if friend_gains.get(s, 0) > 0],
-            key=lambda x: x[1], reverse=True
+        top_three = sorted(
+            ((skill, friend_gains[skill]) for skill in SKILLS if friend_gains.get(skill, 0) > 0),
+            key=lambda item: item[1],
+            reverse=True,
         )[:3]
 
-        if top3:
-            top3_html = "".join(
+        if top_three:
+            top_three_html = "".join(
                 f'<div style="font-size:12px; color:#374151; padding: 2px 0;">'
-                f'&nbsp;&nbsp;• {s.capitalize()}: +{xp:,} xp (Lv{friends_data[friend][s]["level"]})</div>'
-                for s, xp in top3
+                f'&bull; {format_skill_name(skill)}: +{xp:,} xp '
+                f'(Lv{friends_data[friend][skill]["level"]})</div>'
+                for skill, xp in top_three
             )
         else:
-            top3_html = '<div style="font-size:12px; color:#9ca3af;">No xp gained today</div>'
+            top_three_html = '<div style="font-size:12px; color:#9ca3af;">No xp gained today</div>'
 
         rows_html += f"""
 <div style="margin-bottom: 14px;">
@@ -199,244 +236,245 @@ def friend_comparison_html(your_gains, friends_data, previous_all):
     {badge}
   </div>
   <div style="font-size:12px; color:#6b7280; margin-bottom:3px;">Top gains:</div>
-  {top3_html}
+  {top_three_html}
 </div>"""
 
-    return section("Daily XP — You vs Friends", "⚔️", rows_html)
+    return section("Daily XP - You vs Friends", rows_html)
 
-# =========================
-# GOAL 1: BASE 90
-# =========================
 
-def base90_html(stats, gains):
+def base90_html(stats: dict, gains: dict) -> str:
     goal_xp = level_to_xp(90)
     days_left = days_until(GOAL_BASE90_DATE)
 
-    skills_done = []
-    skills_remaining = []
+    completed = []
+    remaining = []
 
     for skill in SKILLS:
         if skill not in stats:
             continue
-        if stats[skill]["level"] >= 90:
-            skills_done.append(skill)
-        else:
-            current_xp = stats[skill]["experience"]
-            remaining_xp = goal_xp - current_xp
-            pct = round(current_xp / goal_xp * 100, 1)
-            daily_xp = gains.get(skill, 0)
-            eta_str = f"~{round(remaining_xp / daily_xp, 1)}d" if daily_xp > 0 else "no recent xp"
-            skills_remaining.append((skill, stats[skill]["level"], pct, remaining_xp, eta_str))
 
-    skills_remaining.sort(key=lambda x: x[2], reverse=True)
+        if stats[skill]["level"] >= 90:
+            completed.append(skill)
+            continue
+
+        current_xp = stats[skill]["experience"]
+        remaining_xp = goal_xp - current_xp
+        percent = round(current_xp / goal_xp * 100, 1)
+        daily_xp = gains.get(skill, 0)
+        eta = f"~{round(remaining_xp / daily_xp, 1)}d" if daily_xp > 0 else "no recent xp"
+        remaining.append((skill, stats[skill]["level"], percent, remaining_xp, eta))
+
+    remaining.sort(key=lambda item: item[2], reverse=True)
 
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
   {row("Deadline", f"{GOAL_BASE90_DATE} ({days_left} days left)")}
-  {row("Skills at 90+", f"{len(skills_done)}/{len(SKILLS)}", muted=not skills_remaining)}
+  {row("Skills at 90+", f"{len(completed)}/{len(SKILLS)}", muted=not remaining)}
 </table>"""
 
-    if skills_remaining:
-        content += '<div style="margin-top:10px; font-size:12px; font-weight:700; color:#374151; text-transform:uppercase; letter-spacing:.04em;">Still needed</div>'
-        for skill, level, pct, remaining_xp, eta_str in skills_remaining:
-            bar_color = "#f59e0b" if pct >= 80 else "#8b5cf6"
-            content += f"""
+    if not remaining:
+        content += '<div style="margin-top:8px; font-size:14px; color:#16a34a; font-weight:700;">Base 90 complete.</div>'
+        return section("Goal 1 - Base 90 All Skills", content)
+
+    content += '<div style="margin-top:10px; font-size:12px; font-weight:700; color:#374151; text-transform:uppercase; letter-spacing:.04em;">Still needed</div>'
+
+    for skill, level, percent, remaining_xp, eta in remaining:
+        bar_color = "#f59e0b" if percent >= 80 else "#8b5cf6"
+        content += f"""
 <div style="margin: 6px 0;">
   <div style="display:flex; justify-content:space-between; font-size:12px; color:#374151;">
-    <span><b>{skill.capitalize()}</b> Lv{level}</span>
-    <span style="color:#6b7280;">{pct}% &nbsp;·&nbsp; {remaining_xp:,} xp &nbsp;·&nbsp; {eta_str}</span>
+    <span><b>{format_skill_name(skill)}</b> Lv{level}</span>
+    <span style="color:#6b7280;">{percent}% · {remaining_xp:,} xp · {eta}</span>
   </div>
-  {progress_bar(pct, bar_color)}
+  {progress_bar(percent, bar_color)}
 </div>"""
-    else:
-        content += '<div style="margin-top:8px; font-size:14px; color:#16a34a; font-weight:700;">✅ Base 90 complete!</div>'
 
-    return section("Goal 1 · Base 90 All Skills", "🎯", content)
+    return section("Goal 1 - Base 90 All Skills", content)
 
-# =========================
-# GOAL 2: TOTAL LEVEL 2250 BY RUNEFEST
-# =========================
 
-def total_level_html(stats, gains):
+def total_level_html(stats: dict, gains: dict) -> str:
     days_left = days_until(GOAL_RUNEFEST_DATE)
     total_level = stats["overall"]["level"] if "overall" in stats else sum(
-        stats[s]["level"] for s in SKILLS if s in stats
+        stats[skill]["level"] for skill in SKILLS if skill in stats
     )
     levels_needed = max(GOAL_RUNEFEST_LEVEL - total_level, 0)
-    pct = round(min(total_level / GOAL_RUNEFEST_LEVEL * 100, 100), 1)
+    percent = round(min(total_level / GOAL_RUNEFEST_LEVEL * 100, 100), 1)
 
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
-  {row("Deadline", f"{GOAL_RUNEFEST_DATE} — RuneFest ({days_left} days left)")}
+  {row("Deadline", f"{GOAL_RUNEFEST_DATE} - RuneFest ({days_left} days left)")}
   {row("Current total level", f"{total_level:,} / {GOAL_RUNEFEST_LEVEL:,}")}
   {row("Levels still needed", str(levels_needed))}
 </table>
-{progress_bar(pct, "#3b82f6")}"""
+{progress_bar(percent, "#3b82f6")}"""
 
     if levels_needed <= 0:
-        content += '<div style="font-size:14px; color:#16a34a; font-weight:700;">✅ RuneFest goal achieved!</div>'
+        content += '<div style="font-size:14px; color:#16a34a; font-weight:700;">RuneFest goal achieved.</div>'
     else:
-        lpd = round(levels_needed / days_left, 2)
-        content += f'<div style="font-size:12px; color:#6b7280; margin-top:4px;">Need <b>{lpd}</b> levels/day to hit {GOAL_RUNEFEST_LEVEL} in time</div>'
+        levels_per_day = round(levels_needed / days_left, 2)
+        content += f'<div style="font-size:12px; color:#6b7280; margin-top:4px;">Need <b>{levels_per_day}</b> levels/day to hit {GOAL_RUNEFEST_LEVEL} in time</div>'
 
-    active = [(s, gains.get(s, 0)) for s in SKILLS if s in stats and gains.get(s, 0) > 0]
-    active.sort(key=lambda x: x[1], reverse=True)
+    active = [(skill, gains.get(skill, 0)) for skill in SKILLS if skill in stats and gains.get(skill, 0) > 0]
+    active.sort(key=lambda item: item[1], reverse=True)
 
     if active:
         content += '<div style="margin-top:10px; font-size:12px; font-weight:700; color:#374151; text-transform:uppercase; letter-spacing:.04em;">Most active today</div>'
         for skill, xp in active[:5]:
-            content += (f'<div style="font-size:12px; color:#374151; padding:2px 0;">'
-                        f'• {skill.capitalize()}: +{xp:,} xp (Lv{stats[skill]["level"]})</div>')
+            content += (
+                f'<div style="font-size:12px; color:#374151; padding:2px 0;">'
+                f'&bull; {format_skill_name(skill)}: +{xp:,} xp (Lv{stats[skill]["level"]})</div>'
+            )
 
-    return section(f"Goal 2 · Total Level {GOAL_RUNEFEST_LEVEL} by RuneFest", "⛵", content)
+    return section(f"Goal 2 - Total Level {GOAL_RUNEFEST_LEVEL} by RuneFest", content)
 
-# =========================
-# GOAL 3: MAX BY 33RD BIRTHDAY
-# =========================
 
-def max_progress_html(stats, gains):
+def max_progress_html(stats: dict, gains: dict) -> str:
     days_left = days_until(GOAL_MAX_DATE)
     goal_xp = level_to_xp(MAX_SKILL_LEVEL)
 
-    skills_maxed = []
-    skills_remaining = []
+    maxed = []
+    remaining = []
 
     for skill in SKILLS:
         if skill not in stats:
             continue
-        if stats[skill]["level"] >= MAX_SKILL_LEVEL:
-            skills_maxed.append(skill)
-        else:
-            remaining_xp = goal_xp - stats[skill]["experience"]
-            daily_xp = gains.get(skill, 0)
-            eta_str = f"~{round(remaining_xp / daily_xp, 1)}d" if daily_xp > 0 else "no recent xp"
-            skills_remaining.append((skill, stats[skill]["level"], remaining_xp, eta_str))
 
-    skills_remaining.sort(key=lambda x: x[2])
-    pct = round(len(skills_maxed) / len(SKILLS) * 100, 1)
+        if stats[skill]["level"] >= MAX_SKILL_LEVEL:
+            maxed.append(skill)
+            continue
+
+        remaining_xp = goal_xp - stats[skill]["experience"]
+        daily_xp = gains.get(skill, 0)
+        eta = f"~{round(remaining_xp / daily_xp, 1)}d" if daily_xp > 0 else "no recent xp"
+        remaining.append((skill, stats[skill]["level"], remaining_xp, eta))
+
+    remaining.sort(key=lambda item: item[2])
+    percent = round(len(maxed) / len(SKILLS) * 100, 1)
 
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
-  {row("Deadline", f"{GOAL_MAX_DATE} — 33rd birthday ({days_left} days left)")}
-  {row("Skills maxed", f"{len(skills_maxed)}/{len(SKILLS)}")}
+  {row("Deadline", f"{GOAL_MAX_DATE} - 33rd birthday ({days_left} days left)")}
+  {row("Skills maxed", f"{len(maxed)}/{len(SKILLS)}")}
 </table>
-{progress_bar(pct, "#ec4899")}"""
+{progress_bar(percent, "#ec4899")}"""
 
-    if skills_maxed:
+    if maxed:
         content += '<div style="margin: 6px 0 10px;">'
-        for s in skills_maxed:
-            content += pill(s.capitalize(), "#16a34a")
-        content += '</div>'
+        content += "".join(pill(format_skill_name(skill), "#16a34a") for skill in maxed)
+        content += "</div>"
 
-    if skills_remaining:
-        content += '<div style="font-size:12px; font-weight:700; color:#374151; text-transform:uppercase; letter-spacing:.04em; margin-top:6px;">Closest to 99</div>'
-        for skill, level, remaining_xp, eta_str in skills_remaining[:5]:
-            goal_xp_val = level_to_xp(MAX_SKILL_LEVEL)
-            skill_pct = round((goal_xp_val - remaining_xp) / goal_xp_val * 100, 1)
-            content += f"""
+    if not remaining:
+        content += '<div style="font-size:14px; color:#16a34a; font-weight:700; margin-top:8px;">Maxed.</div>'
+        return section("Goal 3 - Max Cape by 33rd Birthday", content)
+
+    content += '<div style="font-size:12px; font-weight:700; color:#374151; text-transform:uppercase; letter-spacing:.04em; margin-top:6px;">Closest to 99</div>'
+
+    for skill, level, remaining_xp, eta in remaining[:5]:
+        skill_percent = round((goal_xp - remaining_xp) / goal_xp * 100, 1)
+        content += f"""
 <div style="margin: 6px 0;">
   <div style="font-size:12px; color:#374151;">
-    <b>{skill.capitalize()}</b> Lv{level}
-    <span style="color:#6b7280;"> &nbsp;·&nbsp; {remaining_xp:,} xp to 99 &nbsp;·&nbsp; {eta_str}</span>
+    <b>{format_skill_name(skill)}</b> Lv{level}
+    <span style="color:#6b7280;"> · {remaining_xp:,} xp to 99 · {eta}</span>
   </div>
-  {progress_bar(skill_pct, "#ec4899")}
+  {progress_bar(skill_percent, "#ec4899")}
 </div>"""
-    else:
-        content += '<div style="font-size:14px; color:#16a34a; font-weight:700; margin-top:8px;">✅ Maxed!</div>'
 
-    return section("Goal 3 · Max Cape by 33rd Birthday", "🎂", content)
+    return section("Goal 3 - Max Cape by 33rd Birthday", content)
 
-# =========================
-# AI COACHING SECTION
-# =========================
 
-def generate_ai_coaching(your_gains, your_stats, friends_data, previous_all):
+def generate_ai_coaching(your_gains: dict, your_stats: dict, friends_data: dict, previous_all: dict) -> str:
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is not set.")
+
     days_to_base90 = days_until(GOAL_BASE90_DATE)
     days_to_runefest = days_until(GOAL_RUNEFEST_DATE)
     days_to_max = days_until(GOAL_MAX_DATE)
 
-    your_total_xp = sum(v for k, v in your_gains.items() if k in SKILLS)
-
+    your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
     top_gains = sorted(
-        [(s, your_gains[s]) for s in SKILLS if your_gains.get(s, 0) > 0],
-        key=lambda x: x[1], reverse=True
+        ((skill, your_gains[skill]) for skill in SKILLS if your_gains.get(skill, 0) > 0),
+        key=lambda item: item[1],
+        reverse=True,
     )[:5]
 
-    skills_under_90 = [s for s in SKILLS if s in your_stats and your_stats[s]["level"] < 90]
-    skills_maxed = [s for s in SKILLS if s in your_stats and your_stats[s]["level"] >= 99]
+    skills_under_90 = [skill for skill in SKILLS if skill in your_stats and your_stats[skill]["level"] < 90]
+    skills_maxed = [skill for skill in SKILLS if skill in your_stats and your_stats[skill]["level"] >= 99]
     total_level = your_stats["overall"]["level"] if "overall" in your_stats else 0
 
     friend_lines = []
     for friend in FRIENDS:
         if friend not in friends_data:
             continue
+
         friend_gains = calculate_gains(previous_all, friend, friends_data[friend])
-        friend_xp = sum(v for k, v in friend_gains.items() if k in SKILLS)
+        friend_xp = sum(value for skill, value in friend_gains.items() if skill in SKILLS)
         diff = your_total_xp - friend_xp
         status = f"you're ahead by {diff:,}" if diff >= 0 else f"they're ahead by {abs(diff):,}"
         friend_lines.append(f"- {friend}: {friend_xp:,} xp today ({status})")
 
-    prompt = f"""You are a coaching assistant for an Old School RuneScape player named jhusebachz.
+    prompt = f"""You are a coaching assistant for an Old School RuneScape player named {USERNAME}.
 They have three personal goals with real deadlines. Write a motivating, personalized coaching message
 (4-6 sentences) referencing their actual numbers, daily XP vs friends, and which goals are most urgent.
 
 TODAY'S STATS:
 - Total XP gained today: {your_total_xp:,}
-- Top gains: {', '.join(f"{s} +{xp:,}" for s, xp in top_gains) or 'none today'}
+- Top gains: {", ".join(f"{format_skill_name(skill)} +{xp:,}" for skill, xp in top_gains) or "none today"}
 
 FRIEND XP RACE TODAY:
-{chr(10).join(friend_lines) or 'No friend data available'}
+{chr(10).join(friend_lines) or "No friend data available"}
 
 GOAL 1 - Base 90 all skills by {GOAL_BASE90_DATE} ({days_to_base90} days left):
 - Skills still under 90: {len(skills_under_90)}/{len(SKILLS)}
-- Remaining: {', '.join(skills_under_90) if skills_under_90 else 'COMPLETE!'}
+- Remaining: {", ".join(format_skill_name(skill) for skill in skills_under_90) if skills_under_90 else "COMPLETE"}
 
 GOAL 2 - Total level {GOAL_RUNEFEST_LEVEL} by RuneFest {GOAL_RUNEFEST_DATE} ({days_to_runefest} days left):
 - Current total level: {total_level} (need {max(GOAL_RUNEFEST_LEVEL - total_level, 0)} more levels)
 
-GOAL 3 - Max cape by {GOAL_MAX_DATE} — his 33rd birthday ({days_to_max} days left):
+GOAL 3 - Max cape by {GOAL_MAX_DATE} ({days_to_max} days left):
 - Maxed: {len(skills_maxed)}/{len(SKILLS)} skills at 99
 
 Be specific, reference the deadlines, and prioritize whichever goal is most at risk."""
 
-    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    client = Groq(api_key=GROQ_API_KEY)
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=400
+        max_tokens=400,
     )
     return response.choices[0].message.content
 
-def coaching_html(your_gains, your_stats, friends_data, previous_all):
+
+def coaching_html(your_gains: dict, your_stats: dict, friends_data: dict, previous_all: dict) -> str:
     try:
         text = generate_ai_coaching(your_gains, your_stats, friends_data, previous_all)
         paragraphs = "".join(
-            f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">{p.strip()}</p>'
-            for p in text.strip().split("\n") if p.strip()
+            f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">{line.strip()}</p>'
+            for line in text.strip().splitlines()
+            if line.strip()
         )
         content = paragraphs
-    except Exception as e:
-        content = f'<p style="color:#dc2626; font-size:13px;">Could not generate coaching: {e}</p>'
-    return section("Daily Coaching Insight", "🧠", content)
+    except Exception as error:  # noqa: BLE001 - this is an intentional user-facing fallback
+        content = f'<p style="color:#dc2626; font-size:13px;">Could not generate coaching: {error}</p>'
 
-# =========================
-# FULL HTML EMAIL
-# =========================
+    return section("Daily Coaching Insight", content)
 
-def build_html_email(your_gains, your_stats, friends_data, previous_all):
-    your_total_xp = sum(v for k, v in your_gains.items() if k in SKILLS)
+
+def build_html_email(your_gains: dict, your_stats: dict, friends_data: dict, previous_all: dict) -> str:
+    your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
     today = datetime.now().strftime("%B %d, %Y")
 
-    top = sorted(
-        [(s, your_gains[s]) for s in SKILLS if your_gains.get(s, 0) > 0],
-        key=lambda x: x[1], reverse=True
+    top_gains = sorted(
+        ((skill, your_gains[skill]) for skill in SKILLS if your_gains.get(skill, 0) > 0),
+        key=lambda item: item[1],
+        reverse=True,
     )[:5]
 
-    if top:
+    if top_gains:
         top_gains_html = "".join(
             f'<div style="font-size:13px; color:#374151; padding:3px 0;">'
-            f'<b>{s.capitalize()}</b>: +{xp:,} xp</div>'
-            for s, xp in top
+            f'<b>{format_skill_name(skill)}</b>: +{xp:,} xp</div>'
+            for skill, xp in top_gains
         )
     else:
         top_gains_html = '<div style="font-size:13px; color:#9ca3af;">No xp gained today</div>'
@@ -468,55 +506,51 @@ def build_html_email(your_gains, your_stats, friends_data, previous_all):
   <div style="max-width: 600px; margin: 0 auto; padding: 24px 16px;">
     {body}
     <div style="text-align:center; font-size:11px; color:#9ca3af; margin-top:16px; padding-bottom:24px;">
-      jhusebachz · OSRS Daily Tracker
+      {USERNAME} · OSRS Daily Tracker
     </div>
   </div>
 </body>
 </html>"""
 
-# =========================
-# EMAIL
-# =========================
 
-def send_email(html_content, plain_summary):
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "⚔️ OSRS Daily Report"
-    msg["From"] = EMAIL
-    msg["To"] = TO_EMAIL
-    msg.attach(MIMEText(plain_summary, "plain"))
-    msg.attach(MIMEText(html_content, "html"))
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+def send_email(html_content: str, plain_summary: str) -> None:
+    if not EMAIL or not EMAIL_PASS or not TO_EMAIL:
+        raise RuntimeError("EMAIL_USER and EMAIL_PASS must be set.")
+
+    message = MIMEMultipart("alternative")
+    message["Subject"] = "OSRS Daily Report"
+    message["From"] = EMAIL
+    message["To"] = TO_EMAIL
+    message.attach(MIMEText(plain_summary, "plain"))
+    message.attach(MIMEText(html_content, "html"))
+
+    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
         server.login(EMAIL, EMAIL_PASS)
-        server.send_message(msg)
+        server.send_message(message)
 
-# =========================
-# PLAIN TEXT FALLBACK
-# =========================
 
-def build_plain_text(your_gains, your_stats, friends_data, previous_all):
-    your_total_xp = sum(v for k, v in your_gains.items() if k in SKILLS)
+def build_plain_text(your_gains: dict, friends_data: dict, previous_all: dict) -> str:
+    your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
     lines = [
         f"OSRS Daily Report - {datetime.now().strftime('%Y-%m-%d')}",
         f"Total XP Today: {your_total_xp:,}",
-        ""
+        "",
     ]
+
     for friend in FRIENDS:
         if friend not in friends_data:
             continue
-        fg = calculate_gains(previous_all, friend, friends_data[friend])
-        fxp = sum(v for k, v in fg.items() if k in SKILLS)
-        diff = your_total_xp - fxp
-        status = f"you +{diff:,}" if diff >= 0 else f"them +{abs(diff):,}"
-        lines.append(f"{friend}: {fxp:,} xp ({status})")
+
+        friend_gains = calculate_gains(previous_all, friend, friends_data[friend])
+        friend_xp = sum(value for skill, value in friend_gains.items() if skill in SKILLS)
+        diff = your_total_xp - friend_xp
+        status = f"ahead by {diff:,}" if diff >= 0 else f"trailing by {abs(diff):,}"
+        lines.append(f"{friend}: {friend_xp:,} xp ({status})")
+
     return "\n".join(lines)
 
-# =========================
-# MAIN
-# =========================
 
-def main():
-    # Step 1: Fetch stats for yourself and all friends
-    # Small delay between requests to be polite to the Jagex hiscores API
+def fetch_all_stats() -> tuple[dict, dict]:
     your_stats = fetch_player(USERNAME)
     time.sleep(1)
 
@@ -524,27 +558,26 @@ def main():
     for friend in FRIENDS:
         try:
             friends_data[friend] = fetch_player(friend)
-        except Exception as e:
-            print(f"Warning: could not fetch stats for {friend}: {e}")
+        except Exception as error:  # noqa: BLE001 - one bad friend fetch should not kill the run
+            print(f"Warning: could not fetch stats for {friend}: {error}")
         time.sleep(1)
 
-    # Step 2: Load previous snapshot
-    previous_all = load_previous()
+    return your_stats, friends_data
 
-    # Step 3: Calculate your gains
+
+def main() -> None:
+    your_stats, friends_data = fetch_all_stats()
+    previous_all = load_previous()
     your_gains = calculate_gains(previous_all, USERNAME, your_stats)
 
-    # Step 4: Build email
     html_email = build_html_email(your_gains, your_stats, friends_data, previous_all)
-    plain_email = build_plain_text(your_gains, your_stats, friends_data, previous_all)
+    plain_email = build_plain_text(your_gains, friends_data, previous_all)
 
     print(plain_email)
 
-    # Step 5: Send email
     send_email(html_email, plain_email)
-
-    # Step 6: Save current stats for all players
     save_current(your_stats, friends_data)
+
 
 if __name__ == "__main__":
     main()
