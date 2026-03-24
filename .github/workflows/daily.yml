@@ -2,23 +2,25 @@ name: Daily OSRS Tracker
 
 on:
   schedule:
-    - cron: "30 12 * * *"  # 8:30am EST
+    - cron: "30 12 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  run-script:
+  run-tracker:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: 3.11
+          cache: pip
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -30,10 +32,14 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python main.py
 
-      - name: Save stats JSON to repo
+      - name: Commit updated snapshot
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add data/last_stats.json
-          git commit -m "Daily stats update ${{ github.run_id }}" || echo "Nothing to commit"
+          if git diff --cached --quiet; then
+            echo "No snapshot changes to commit."
+            exit 0
+          fi
+          git commit -m "Daily stats update ${{ github.run_id }}"
           git push
