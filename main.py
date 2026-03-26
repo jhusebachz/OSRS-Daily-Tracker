@@ -29,6 +29,7 @@ DATA_FILE = "data/last_stats.json"
 GOAL_BASE90_DATE = date(2026, 5, 22)
 GOAL_RUNEFEST_DATE = date(2026, 10, 3)
 GOAL_MAX_DATE = date(2027, 3, 15)
+GOAL_PROGRESS_START = date(2026, 3, 25)
 
 GOAL_RUNEFEST_LEVEL = 2250
 MAX_SKILL_LEVEL = 99
@@ -90,6 +91,33 @@ GOAL_TRAINING_PLANS = {
     "hunter": {"xp_per_hour": 70000, "mode": "afk"},
     "thieving": {"xp_per_hour": 180000, "mode": "active"},
     "sailing": {"xp_per_hour": 60000, "mode": "afk"},
+}
+GOAL_PROGRESS_BASELINE = {
+    "overall": {"level": 2203, "experience": 173773255},
+    "attack": {"level": 91, "experience": 6122415},
+    "defence": {"level": 90, "experience": 5712800},
+    "strength": {"level": 92, "experience": 7038075},
+    "hitpoints": {"level": 95, "experience": 9363218},
+    "ranged": {"level": 92, "experience": 7052764},
+    "prayer": {"level": 89, "experience": 5079595},
+    "magic": {"level": 95, "experience": 8857017},
+    "cooking": {"level": 99, "experience": 13063406},
+    "woodcutting": {"level": 90, "experience": 5440702},
+    "fletching": {"level": 99, "experience": 13038303},
+    "fishing": {"level": 90, "experience": 5424395},
+    "firemaking": {"level": 99, "experience": 13044402},
+    "crafting": {"level": 90, "experience": 5382552},
+    "smithing": {"level": 90, "experience": 5414717},
+    "mining": {"level": 90, "experience": 5367729},
+    "herblore": {"level": 90, "experience": 5618952},
+    "agility": {"level": 90, "experience": 5361513},
+    "thieving": {"level": 87, "experience": 4003425},
+    "slayer": {"level": 89, "experience": 4932213},
+    "farming": {"level": 99, "experience": 14415682},
+    "runecraft": {"level": 83, "experience": 2749504},
+    "hunter": {"level": 86, "experience": 3625366},
+    "construction": {"level": 90, "experience": 5361184},
+    "sailing": {"level": 98, "experience": 12303326},
 }
 
 
@@ -189,9 +217,19 @@ def classify_goal(hours_per_day: float | None, manual_skills: list[str]) -> str:
     return "Off track"
 
 
-def build_runefest_projection(stats: dict, levels_needed: int) -> tuple[float, list[str]]:
+def clamp_pct(value: float) -> float:
+    return max(0.0, min(100.0, value))
+
+
+def pace_pct(target_date: date) -> float:
+    total_days = max((target_date - GOAL_PROGRESS_START).days, 1)
+    elapsed_days = (date.today() - GOAL_PROGRESS_START).days
+    return clamp_pct(elapsed_days / total_days * 100)
+
+
+def build_runefest_projection(stats: dict, levels_needed: int) -> tuple[float, int, list[str]]:
     if levels_needed <= 0:
-        return 0.0, []
+        return 0.0, 0, []
 
     projected = {
         skill: {
@@ -203,6 +241,7 @@ def build_runefest_projection(stats: dict, levels_needed: int) -> tuple[float, l
     }
     manual_skills: set[str] = set()
     total_hours = 0.0
+    total_xp = 0
     remaining_levels = levels_needed
 
     while remaining_levels > 0:
@@ -233,12 +272,14 @@ def build_runefest_projection(stats: dict, levels_needed: int) -> tuple[float, l
                     manual_skills.add(format_skill_name(skill))
             break
 
+        xp_needed = max(level_to_xp(projected[best_skill]["level"] + 1) - projected[best_skill]["experience"], 0)
         projected[best_skill]["level"] += 1
         projected[best_skill]["experience"] = level_to_xp(projected[best_skill]["level"])
         total_hours += best_hours
+        total_xp += xp_needed
         remaining_levels -= 1
 
-    return total_hours, sorted(manual_skills)
+    return total_hours, total_xp, sorted(manual_skills)
 
 
 def section(title: str, content_html: str) -> str:
@@ -270,12 +311,43 @@ def pill(text: str, color: str = "#8b5cf6") -> str:
     )
 
 
-def progress_bar(percent: float, color: str = "#8b5cf6") -> str:
+def progress_bar(percent: float, color: str = "#8b5cf6", marker_percent: float | None = None) -> str:
     clamped = min(max(percent, 0), 100)
+    marker_html = ""
+    if marker_percent is not None:
+        marker_html = (
+            f'<div style="position:absolute; left:{clamp_pct(marker_percent)}%; top:-2px; bottom:-2px; '
+            f'width:2px; margin-left:-1px; border-radius:999px; background:#111827; opacity:0.9;"></div>'
+        )
     return f"""
-<div style="background:#e5e7eb; border-radius:999px; height:8px; margin: 3px 0 8px 0;">
+<div style="position:relative; background:#e5e7eb; border-radius:999px; height:8px; margin: 3px 0 8px 0; overflow:hidden;">
   <div style="background:{color}; width:{clamped}%; height:8px; border-radius:999px;"></div>
+  {marker_html}
 </div>"""
+
+
+def goal_progress_pct(stats: dict, target: str) -> float:
+    if target == "runefest":
+        baseline_levels_needed = max(GOAL_RUNEFEST_LEVEL - GOAL_PROGRESS_BASELINE["overall"]["level"], 0)
+        _, baseline_xp, _ = build_runefest_projection(GOAL_PROGRESS_BASELINE, baseline_levels_needed)
+        current_levels_needed = max(GOAL_RUNEFEST_LEVEL - stats["overall"]["level"], 0)
+        _, current_xp, _ = build_runefest_projection(stats, current_levels_needed)
+        return clamp_pct(((baseline_xp - current_xp) / baseline_xp) * 100) if baseline_xp > 0 else 100.0
+
+    goal_level = 90 if target == "base90" else 99
+    baseline_needed = 0
+    current_remaining = 0
+
+    for skill in SKILLS:
+        baseline = GOAL_PROGRESS_BASELINE[skill]
+        if baseline["level"] >= goal_level:
+            continue
+
+        target_xp = level_to_xp(goal_level)
+        baseline_needed += max(target_xp - baseline["experience"], 0)
+        current_remaining += max(target_xp - stats[skill]["experience"], 0)
+
+    return clamp_pct(((baseline_needed - current_remaining) / baseline_needed) * 100) if baseline_needed > 0 else 100.0
 
 
 def friend_comparison_html(your_gains: dict, friends_data: dict, previous_all: dict) -> str:
@@ -336,6 +408,8 @@ def friend_comparison_html(your_gains: dict, friends_data: dict, previous_all: d
 def base90_html(stats: dict, gains: dict) -> str:
     goal_xp = level_to_xp(90)
     days_left = days_until(GOAL_BASE90_DATE)
+    progress_pct = goal_progress_pct(stats, "base90")
+    required_pace_pct = pace_pct(GOAL_BASE90_DATE)
 
     completed = []
     remaining = []
@@ -368,6 +442,12 @@ def base90_html(stats: dict, gains: dict) -> str:
   {row("Required pace", f"{hours_per_day:.2f} h/day" if hours_per_day is not None else "Manual estimate", muted=not remaining)}
   {row("Pace check", pace_status, muted=not remaining)}
 </table>"""
+
+    content += progress_bar(progress_pct, "#8b5cf6", required_pace_pct)
+    content += (
+        f'<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">'
+        f'<span>Actual {progress_pct:.1f}%</span><span>Pace {required_pace_pct:.1f}%</span></div>'
+    )
 
     if not remaining:
         content += '<div style="margin-top:8px; font-size:14px; color:#16a34a; font-weight:700;">Base 90 complete.</div>'
@@ -402,8 +482,10 @@ def total_level_html(stats: dict, gains: dict) -> str:
     )
     levels_needed = max(GOAL_RUNEFEST_LEVEL - total_level, 0)
     percent = round(min(total_level / GOAL_RUNEFEST_LEVEL * 100, 100), 1)
+    progress_pct = goal_progress_pct(stats, "runefest")
+    required_pace_pct = pace_pct(GOAL_RUNEFEST_DATE)
 
-    estimated_hours, manual_skills = build_runefest_projection(stats, levels_needed)
+    estimated_hours, _, manual_skills = build_runefest_projection(stats, levels_needed)
     hours_per_day = estimated_hours / days_left if levels_needed > 0 else 0
     pace_status = classify_goal(hours_per_day if levels_needed > 0 else 0, manual_skills)
 
@@ -416,7 +498,11 @@ def total_level_html(stats: dict, gains: dict) -> str:
   {row("Required pace", f"{hours_per_day:.2f} h/day" if levels_needed > 0 else "Complete")}
   {row("Pace check", pace_status)}
 </table>
-{progress_bar(percent, "#3b82f6")}"""
+{progress_bar(progress_pct, "#3b82f6", required_pace_pct)}
+<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">
+  <span>Actual {progress_pct:.1f}%</span>
+  <span>Pace {required_pace_pct:.1f}%</span>
+</div>"""
 
     if levels_needed <= 0:
         content += '<div style="font-size:14px; color:#16a34a; font-weight:700;">RuneFest goal achieved.</div>'
@@ -446,6 +532,8 @@ def total_level_html(stats: dict, gains: dict) -> str:
 def max_progress_html(stats: dict, gains: dict) -> str:
     days_left = days_until(GOAL_MAX_DATE)
     goal_xp = level_to_xp(MAX_SKILL_LEVEL)
+    progress_pct = goal_progress_pct(stats, "maxcape")
+    required_pace_pct = pace_pct(GOAL_MAX_DATE)
 
     maxed = []
     remaining = []
@@ -477,7 +565,11 @@ def max_progress_html(stats: dict, gains: dict) -> str:
   {row("Required pace", f"{hours_per_day:.2f} h/day" if hours_per_day is not None else "Manual estimate")}
   {row("Pace check", pace_status)}
 </table>
-{progress_bar(percent, "#ec4899")}"""
+{progress_bar(progress_pct, "#ec4899", required_pace_pct)}
+<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">
+  <span>Actual {progress_pct:.1f}%</span>
+  <span>Pace {required_pace_pct:.1f}%</span>
+</div>"""
 
     if maxed:
         content += '<div style="margin: 6px 0 10px;">'
@@ -532,7 +624,7 @@ def coaching_html(your_stats: dict) -> str:
 
     total_level = your_stats["overall"]["level"] if "overall" in your_stats else 0
     levels_needed = max(GOAL_RUNEFEST_LEVEL - total_level, 0)
-    runefest_total, runefest_manual = build_runefest_projection(your_stats, levels_needed)
+    runefest_total, _, runefest_manual = build_runefest_projection(your_stats, levels_needed)
 
     base90_days = days_until(GOAL_BASE90_DATE)
     runefest_days = days_until(GOAL_RUNEFEST_DATE)
