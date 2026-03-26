@@ -229,6 +229,11 @@ def describe_goal_status(status: str) -> str:
     return "needs review"
 
 
+def is_slayer_tracked_skill(skill: str) -> bool:
+    plan = GOAL_TRAINING_PLANS.get(skill)
+    return bool(plan and plan["mode"] == "trained via Slayer")
+
+
 def clamp_pct(value: float) -> float:
     return max(0.0, min(100.0, value))
 
@@ -442,7 +447,9 @@ def base90_html(stats: dict, gains: dict) -> str:
 
     remaining.sort(key=lambda item: item[2], reverse=True)
     estimated_hours = sum(item[4] for item in remaining if item[4] is not None)
-    manual_skills = [format_skill_name(item[0]) for item in remaining if item[4] is None]
+    manual_skills = [
+        format_skill_name(item[0]) for item in remaining if item[4] is None and not is_slayer_tracked_skill(item[0])
+    ]
     hours_per_day = estimated_hours / days_left if days_left > 0 else None
     pace_status = classify_goal(hours_per_day, manual_skills)
 
@@ -565,7 +572,9 @@ def max_progress_html(stats: dict, gains: dict) -> str:
     remaining.sort(key=lambda item: item[2])
     percent = round(len(maxed) / len(SKILLS) * 100, 1)
     estimated_hours = sum(item[3] for item in remaining if item[3] is not None)
-    manual_skills = [format_skill_name(item[0]) for item in remaining if item[3] is None]
+    manual_skills = [
+        format_skill_name(item[0]) for item in remaining if item[3] is None and not is_slayer_tracked_skill(item[0])
+    ]
     hours_per_day = estimated_hours / days_left if days_left > 0 else None
     pace_status = classify_goal(hours_per_day, manual_skills)
 
@@ -622,7 +631,8 @@ def coaching_html(your_stats: dict) -> str:
             remaining_xp = max(level_to_xp(90) - your_stats[skill]["experience"], 0)
             hours_left, _ = projected_hours(skill, remaining_xp)
             if hours_left is None:
-                base90_manual.append(format_skill_name(skill))
+                if not is_slayer_tracked_skill(skill):
+                    base90_manual.append(format_skill_name(skill))
             else:
                 base90_hours.append(hours_left)
 
@@ -630,7 +640,8 @@ def coaching_html(your_stats: dict) -> str:
             remaining_xp = max(level_to_xp(99) - your_stats[skill]["experience"], 0)
             hours_left, _ = projected_hours(skill, remaining_xp)
             if hours_left is None:
-                max_manual.append(format_skill_name(skill))
+                if not is_slayer_tracked_skill(skill):
+                    max_manual.append(format_skill_name(skill))
             else:
                 max_hours.append(hours_left)
 
