@@ -16,6 +16,8 @@ This project pulls fresh hiscores from the official OSRS hiscore API, compares t
   - Total level `2250` by RuneFest
   - Max cape by your 33rd birthday
 - Projects goal pace from expected hourly XP rates instead of sample daily gain assumptions
+- Measures actual goal progress from a fixed `2026-03-25` baseline
+- Draws pace-check bars so each goal shows actual progress versus where the account should be by today
 - Sends a styled HTML email summary
 - Uses a GitHub Actions workflow to run automatically on a schedule
 
@@ -124,6 +126,11 @@ The script currently measures progress against:
 - `Max cape` by `2027-03-15`
 
 Those values are defined directly in [`main.py`](./main.py), so the repo can be adjusted later if the goals or deadlines change.
+
+The daily report now evaluates each goal in two ways:
+
+- estimated grind hours remaining based on expected hourly XP rates
+- actual progress since `2026-03-25` compared with the pace required to hit the deadline
 
 ## Notes
 
