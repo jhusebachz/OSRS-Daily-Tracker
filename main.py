@@ -87,7 +87,7 @@ GOAL_TRAINING_PLANS = {
     "woodcutting": {"xp_per_hour": 70000, "mode": "afk"},
     "fishing": {"xp_per_hour": 40000, "mode": "afk"},
     "mining": {"xp_per_hour": 40000, "mode": "afk"},
-    "hunter": {"xp_per_hour": 130000, "mode": "active"},
+    "hunter": {"xp_per_hour": 70000, "mode": "afk"},
     "thieving": {"xp_per_hour": 180000, "mode": "active"},
     "sailing": {"xp_per_hour": 60000, "mode": "afk"},
 }
