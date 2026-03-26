@@ -379,10 +379,16 @@ def base90_html(stats: dict, gains: dict) -> str:
         bar_color = "#f59e0b" if percent >= 80 else "#8b5cf6"
         content += f"""
 <div style="margin: 6px 0;">
-  <div style="display:flex; justify-content:space-between; font-size:12px; color:#374151;">
-    <span><b>{format_skill_name(skill)}</b> Lv{level}</span>
-    <span style="color:#6b7280; text-align:right;">{percent}% · {remaining_xp:,} xp · {f"{hours_left:.1f}h" if hours_left is not None else rate_text}</span>
-  </div>
+  <table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px; color:#374151;">
+    <tr>
+      <td style="padding:0; color:#374151;">
+        <b>{format_skill_name(skill)}</b> Lv{level}
+      </td>
+      <td style="padding:0 0 0 16px; color:#6b7280; text-align:right; white-space:nowrap;">
+        {percent}% &middot; {remaining_xp:,} xp &middot; {f"{hours_left:.1f}h" if hours_left is not None else rate_text}
+      </td>
+    </tr>
+  </table>
   {progress_bar(percent, bar_color)}
 </div>"""
 
