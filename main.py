@@ -217,6 +217,18 @@ def classify_goal(hours_per_day: float | None, manual_skills: list[str]) -> str:
     return "Off track"
 
 
+def describe_goal_status(status: str) -> str:
+    if status == "On track":
+        return "is on track"
+    if status == "Tight":
+        return "looks tight"
+    if status == "Off track":
+        return "looks off track"
+    if status == "Needs manual lane":
+        return "needs a manual estimate"
+    return "needs review"
+
+
 def clamp_pct(value: float) -> float:
     return max(0.0, min(100.0, value))
 
@@ -640,17 +652,17 @@ def coaching_html(your_stats: dict) -> str:
     content = "".join(
         [
             f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
-            f'Base 90 is <b>technically {classify_goal(base90_rate, base90_manual).lower()}</b> at '
+            f'Base 90 <b>{describe_goal_status(classify_goal(base90_rate, base90_manual))}</b> at '
             f'<b>{base90_rate:.2f} hours/day</b> through {GOAL_BASE90_DATE}.'
             f'{" Manual estimate still needed for: " + ", ".join(base90_manual) + "." if base90_manual else ""}'
             f'</p>',
             f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
-            f'RuneFest 2250 is <b>technically {classify_goal(runefest_rate, runefest_manual).lower()}</b> at '
+            f'RuneFest 2250 <b>{describe_goal_status(classify_goal(runefest_rate, runefest_manual))}</b> at '
             f'<b>{runefest_rate:.2f} hours/day</b> and <b>{(levels_needed / runefest_days if runefest_days > 0 else 0):.2f} levels/day</b>.'
             f'{" Manual estimate still needed for: " + ", ".join(runefest_manual) + "." if runefest_manual else ""}'
             f'</p>',
             f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
-            f'Max cape is <b>technically {classify_goal(max_rate, max_manual).lower()}</b> at '
+            f'Max cape <b>{describe_goal_status(classify_goal(max_rate, max_manual))}</b> at '
             f'<b>{max_rate:.2f} hours/day</b> through {GOAL_MAX_DATE}.'
             f'{" Manual estimate still needed for: " + ", ".join(max_manual) + "." if max_manual else ""}'
             f'</p>',
