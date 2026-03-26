@@ -15,6 +15,7 @@ This project pulls fresh hiscores from the official OSRS hiscore API, compares t
   - Base 90 all skills
   - Total level `2250` by RuneFest
   - Max cape by your 33rd birthday
+- Projects goal pace from expected hourly XP rates instead of sample daily gain assumptions
 - Sends a styled HTML email summary
 - Uses a GitHub Actions workflow to run automatically on a schedule
 
@@ -81,9 +82,8 @@ To run successfully in GitHub Actions, the repository needs these secrets:
 
 - `EMAIL_USER`
 - `EMAIL_PASS`
-- `GROQ_API_KEY`
 
-The script sends the daily report email using the configured mailbox and uses Groq for the coaching summary section.
+The script sends the daily report email using the configured mailbox.
 
 ## Local Setup
 
@@ -107,7 +107,6 @@ pip install -r requirements.txt
 ```powershell
 $env:EMAIL_USER="you@example.com"
 $env:EMAIL_PASS="your-app-password"
-$env:GROQ_API_KEY="your-key"
 ```
 
 4. Run the tracker:

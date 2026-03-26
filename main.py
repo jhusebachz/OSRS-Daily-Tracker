@@ -19,7 +19,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import requests
-from groq import Groq
 
 
 USERNAME = "jhusebachz"
@@ -67,11 +66,31 @@ SKILLS = HISCORE_SKILLS[1:]
 EMAIL = os.environ.get("EMAIL_USER")
 EMAIL_PASS = os.environ.get("EMAIL_PASS")
 TO_EMAIL = EMAIL
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-
 HISCORE_HEADERS = {"User-Agent": "OSRS-Daily-Tracker/1.0"}
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
+GOAL_TRAINING_PLANS = {
+    "attack": {"xp_per_hour": 0, "mode": "trained via Slayer"},
+    "strength": {"xp_per_hour": 0, "mode": "trained via Slayer"},
+    "defence": {"xp_per_hour": 0, "mode": "trained via Slayer"},
+    "hitpoints": {"xp_per_hour": 0, "mode": "trained via Slayer"},
+    "ranged": {"xp_per_hour": 0, "mode": "trained via Slayer"},
+    "magic": {"xp_per_hour": 0, "mode": "trained via Slayer"},
+    "slayer": {"xp_per_hour": 40000, "mode": "active"},
+    "prayer": {"xp_per_hour": 150000, "mode": "semi-afk"},
+    "runecraft": {"xp_per_hour": 50000, "mode": "active"},
+    "construction": {"xp_per_hour": 220000, "mode": "active"},
+    "herblore": {"xp_per_hour": 200000, "mode": "active"},
+    "agility": {"xp_per_hour": 50000, "mode": "active"},
+    "crafting": {"xp_per_hour": 200000, "mode": "active"},
+    "smithing": {"xp_per_hour": 220000, "mode": "active"},
+    "woodcutting": {"xp_per_hour": 70000, "mode": "afk"},
+    "fishing": {"xp_per_hour": 40000, "mode": "afk"},
+    "mining": {"xp_per_hour": 40000, "mode": "afk"},
+    "hunter": {"xp_per_hour": 130000, "mode": "active"},
+    "thieving": {"xp_per_hour": 180000, "mode": "active"},
+    "sailing": {"xp_per_hour": 60000, "mode": "afk"},
+}
 
 
 def format_skill_name(skill: str) -> str:
@@ -148,6 +167,78 @@ def level_to_xp(level: int) -> int:
 
 def days_until(target_date: date) -> int:
     return max((target_date - date.today()).days, 1)
+
+
+def projected_hours(skill: str, remaining_xp: int) -> tuple[float | None, str]:
+    plan = GOAL_TRAINING_PLANS.get(skill)
+    if not plan or plan["xp_per_hour"] <= 0:
+        return None, plan["mode"] if plan else "manual estimate"
+
+    return remaining_xp / plan["xp_per_hour"], f'{plan["xp_per_hour"]:,} xp/hr ({plan["mode"]})'
+
+
+def classify_goal(hours_per_day: float | None, manual_skills: list[str]) -> str:
+    if manual_skills:
+        return "Needs manual lane"
+    if hours_per_day is None:
+        return "Off track"
+    if hours_per_day <= 1.5:
+        return "On track"
+    if hours_per_day <= 3:
+        return "Tight"
+    return "Off track"
+
+
+def build_runefest_projection(stats: dict, levels_needed: int) -> tuple[float, list[str]]:
+    if levels_needed <= 0:
+        return 0.0, []
+
+    projected = {
+        skill: {
+            "level": data["level"],
+            "experience": data["experience"],
+        }
+        for skill, data in stats.items()
+        if skill in SKILLS
+    }
+    manual_skills: set[str] = set()
+    total_hours = 0.0
+    remaining_levels = levels_needed
+
+    while remaining_levels > 0:
+        best_skill = None
+        best_hours = None
+
+        for skill in SKILLS:
+            if skill not in projected:
+                continue
+
+            plan = GOAL_TRAINING_PLANS.get(skill)
+            if not plan or plan["xp_per_hour"] <= 0 or projected[skill]["level"] >= MAX_SKILL_LEVEL:
+                continue
+
+            next_level = projected[skill]["level"] + 1
+            remaining_xp = max(level_to_xp(next_level) - projected[skill]["experience"], 0)
+            if remaining_xp <= 0:
+                continue
+
+            level_hours = remaining_xp / plan["xp_per_hour"]
+            if best_hours is None or level_hours < best_hours:
+                best_skill = skill
+                best_hours = level_hours
+
+        if best_skill is None or best_hours is None:
+            for skill in SKILLS:
+                if skill in projected and projected[skill]["level"] < MAX_SKILL_LEVEL:
+                    manual_skills.add(format_skill_name(skill))
+            break
+
+        projected[best_skill]["level"] += 1
+        projected[best_skill]["experience"] = level_to_xp(projected[best_skill]["level"])
+        total_hours += best_hours
+        remaining_levels -= 1
+
+    return total_hours, sorted(manual_skills)
 
 
 def section(title: str, content_html: str) -> str:
@@ -260,16 +351,22 @@ def base90_html(stats: dict, gains: dict) -> str:
         current_xp = stats[skill]["experience"]
         remaining_xp = goal_xp - current_xp
         percent = round(current_xp / goal_xp * 100, 1)
-        daily_xp = gains.get(skill, 0)
-        eta = f"~{round(remaining_xp / daily_xp, 1)}d" if daily_xp > 0 else "no recent xp"
-        remaining.append((skill, stats[skill]["level"], percent, remaining_xp, eta))
+        hours_left, rate_text = projected_hours(skill, remaining_xp)
+        remaining.append((skill, stats[skill]["level"], percent, remaining_xp, hours_left, rate_text))
 
     remaining.sort(key=lambda item: item[2], reverse=True)
+    estimated_hours = sum(item[4] for item in remaining if item[4] is not None)
+    manual_skills = [format_skill_name(item[0]) for item in remaining if item[4] is None]
+    hours_per_day = estimated_hours / days_left if days_left > 0 else None
+    pace_status = classify_goal(hours_per_day, manual_skills)
 
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
   {row("Deadline", f"{GOAL_BASE90_DATE} ({days_left} days left)")}
   {row("Skills at 90+", f"{len(completed)}/{len(SKILLS)}", muted=not remaining)}
+  {row("Estimated grind", f"{estimated_hours:.1f} hours" if remaining else "Complete", muted=not remaining)}
+  {row("Required pace", f"{hours_per_day:.2f} h/day" if hours_per_day is not None else "Manual estimate", muted=not remaining)}
+  {row("Pace check", pace_status, muted=not remaining)}
 </table>"""
 
     if not remaining:
@@ -278,13 +375,13 @@ def base90_html(stats: dict, gains: dict) -> str:
 
     content += '<div style="margin-top:10px; font-size:12px; font-weight:700; color:#374151; text-transform:uppercase; letter-spacing:.04em;">Still needed</div>'
 
-    for skill, level, percent, remaining_xp, eta in remaining:
+    for skill, level, percent, remaining_xp, hours_left, rate_text in remaining:
         bar_color = "#f59e0b" if percent >= 80 else "#8b5cf6"
         content += f"""
 <div style="margin: 6px 0;">
   <div style="display:flex; justify-content:space-between; font-size:12px; color:#374151;">
     <span><b>{format_skill_name(skill)}</b> Lv{level}</span>
-    <span style="color:#6b7280;">{percent}% · {remaining_xp:,} xp · {eta}</span>
+    <span style="color:#6b7280; text-align:right;">{percent}% · {remaining_xp:,} xp · {f"{hours_left:.1f}h" if hours_left is not None else rate_text}</span>
   </div>
   {progress_bar(percent, bar_color)}
 </div>"""
@@ -300,11 +397,18 @@ def total_level_html(stats: dict, gains: dict) -> str:
     levels_needed = max(GOAL_RUNEFEST_LEVEL - total_level, 0)
     percent = round(min(total_level / GOAL_RUNEFEST_LEVEL * 100, 100), 1)
 
+    estimated_hours, manual_skills = build_runefest_projection(stats, levels_needed)
+    hours_per_day = estimated_hours / days_left if levels_needed > 0 else 0
+    pace_status = classify_goal(hours_per_day if levels_needed > 0 else 0, manual_skills)
+
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
   {row("Deadline", f"{GOAL_RUNEFEST_DATE} - RuneFest ({days_left} days left)")}
   {row("Current total level", f"{total_level:,} / {GOAL_RUNEFEST_LEVEL:,}")}
   {row("Levels still needed", str(levels_needed))}
+  {row("Estimated grind", f"{estimated_hours:.1f} hours" if levels_needed > 0 else "Complete")}
+  {row("Required pace", f"{hours_per_day:.2f} h/day" if levels_needed > 0 else "Complete")}
+  {row("Pace check", pace_status)}
 </table>
 {progress_bar(percent, "#3b82f6")}"""
 
@@ -313,6 +417,11 @@ def total_level_html(stats: dict, gains: dict) -> str:
     else:
         levels_per_day = round(levels_needed / days_left, 2)
         content += f'<div style="font-size:12px; color:#6b7280; margin-top:4px;">Need <b>{levels_per_day}</b> levels/day to hit {GOAL_RUNEFEST_LEVEL} in time</div>'
+        if manual_skills:
+            content += (
+                f'<div style="font-size:12px; color:#6b7280; margin-top:4px;">'
+                f'Manual estimate still needed for: {", ".join(manual_skills)}</div>'
+            )
 
     active = [(skill, gains.get(skill, 0)) for skill in SKILLS if skill in stats and gains.get(skill, 0) > 0]
     active.sort(key=lambda item: item[1], reverse=True)
@@ -344,17 +453,23 @@ def max_progress_html(stats: dict, gains: dict) -> str:
             continue
 
         remaining_xp = goal_xp - stats[skill]["experience"]
-        daily_xp = gains.get(skill, 0)
-        eta = f"~{round(remaining_xp / daily_xp, 1)}d" if daily_xp > 0 else "no recent xp"
-        remaining.append((skill, stats[skill]["level"], remaining_xp, eta))
+        hours_left, rate_text = projected_hours(skill, remaining_xp)
+        remaining.append((skill, stats[skill]["level"], remaining_xp, hours_left, rate_text))
 
     remaining.sort(key=lambda item: item[2])
     percent = round(len(maxed) / len(SKILLS) * 100, 1)
+    estimated_hours = sum(item[3] for item in remaining if item[3] is not None)
+    manual_skills = [format_skill_name(item[0]) for item in remaining if item[3] is None]
+    hours_per_day = estimated_hours / days_left if days_left > 0 else None
+    pace_status = classify_goal(hours_per_day, manual_skills)
 
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
   {row("Deadline", f"{GOAL_MAX_DATE} - 33rd birthday ({days_left} days left)")}
   {row("Skills maxed", f"{len(maxed)}/{len(SKILLS)}")}
+  {row("Estimated grind", f"{estimated_hours:.1f} hours" if remaining else "Complete")}
+  {row("Required pace", f"{hours_per_day:.2f} h/day" if hours_per_day is not None else "Manual estimate")}
+  {row("Pace check", pace_status)}
 </table>
 {progress_bar(percent, "#ec4899")}"""
 
@@ -369,13 +484,13 @@ def max_progress_html(stats: dict, gains: dict) -> str:
 
     content += '<div style="font-size:12px; font-weight:700; color:#374151; text-transform:uppercase; letter-spacing:.04em; margin-top:6px;">Closest to 99</div>'
 
-    for skill, level, remaining_xp, eta in remaining[:5]:
+    for skill, level, remaining_xp, hours_left, rate_text in remaining[:5]:
         skill_percent = round((goal_xp - remaining_xp) / goal_xp * 100, 1)
         content += f"""
 <div style="margin: 6px 0;">
   <div style="font-size:12px; color:#374151;">
     <b>{format_skill_name(skill)}</b> Lv{level}
-    <span style="color:#6b7280;"> · {remaining_xp:,} xp to 99 · {eta}</span>
+    <span style="color:#6b7280;"> · {remaining_xp:,} xp to 99 · {f"{hours_left:.1f}h" if hours_left is not None else rate_text}</span>
   </div>
   {progress_bar(skill_percent, "#ec4899")}
 </div>"""
@@ -383,79 +498,66 @@ def max_progress_html(stats: dict, gains: dict) -> str:
     return section("Goal 3 - Max Cape by 33rd Birthday", content)
 
 
-def generate_ai_coaching(your_gains: dict, your_stats: dict, friends_data: dict, previous_all: dict) -> str:
-    if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY is not set.")
+def coaching_html(your_stats: dict) -> str:
+    base90_hours = []
+    base90_manual = []
+    max_hours = []
+    max_manual = []
 
-    days_to_base90 = days_until(GOAL_BASE90_DATE)
-    days_to_runefest = days_until(GOAL_RUNEFEST_DATE)
-    days_to_max = days_until(GOAL_MAX_DATE)
-
-    your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
-    top_gains = sorted(
-        ((skill, your_gains[skill]) for skill in SKILLS if your_gains.get(skill, 0) > 0),
-        key=lambda item: item[1],
-        reverse=True,
-    )[:5]
-
-    skills_under_90 = [skill for skill in SKILLS if skill in your_stats and your_stats[skill]["level"] < 90]
-    skills_maxed = [skill for skill in SKILLS if skill in your_stats and your_stats[skill]["level"] >= 99]
-    total_level = your_stats["overall"]["level"] if "overall" in your_stats else 0
-
-    friend_lines = []
-    for friend in FRIENDS:
-        if friend not in friends_data:
+    for skill in SKILLS:
+        if skill not in your_stats:
             continue
 
-        friend_gains = calculate_gains(previous_all, friend, friends_data[friend])
-        friend_xp = sum(value for skill, value in friend_gains.items() if skill in SKILLS)
-        diff = your_total_xp - friend_xp
-        status = f"you're ahead by {diff:,}" if diff >= 0 else f"they're ahead by {abs(diff):,}"
-        friend_lines.append(f"- {friend}: {friend_xp:,} xp today ({status})")
+        if your_stats[skill]["level"] < 90:
+            remaining_xp = max(level_to_xp(90) - your_stats[skill]["experience"], 0)
+            hours_left, _ = projected_hours(skill, remaining_xp)
+            if hours_left is None:
+                base90_manual.append(format_skill_name(skill))
+            else:
+                base90_hours.append(hours_left)
 
-    prompt = f"""You are a coaching assistant for an Old School RuneScape player named {USERNAME}.
-They have three personal goals with real deadlines. Write a motivating, personalized coaching message
-(4-6 sentences) referencing their actual numbers, daily XP vs friends, and which goals are most urgent.
+        if your_stats[skill]["level"] < 99:
+            remaining_xp = max(level_to_xp(99) - your_stats[skill]["experience"], 0)
+            hours_left, _ = projected_hours(skill, remaining_xp)
+            if hours_left is None:
+                max_manual.append(format_skill_name(skill))
+            else:
+                max_hours.append(hours_left)
 
-TODAY'S STATS:
-- Total XP gained today: {your_total_xp:,}
-- Top gains: {", ".join(f"{format_skill_name(skill)} +{xp:,}" for skill, xp in top_gains) or "none today"}
+    total_level = your_stats["overall"]["level"] if "overall" in your_stats else 0
+    levels_needed = max(GOAL_RUNEFEST_LEVEL - total_level, 0)
+    runefest_total, runefest_manual = build_runefest_projection(your_stats, levels_needed)
 
-FRIEND XP RACE TODAY:
-{chr(10).join(friend_lines) or "No friend data available"}
+    base90_days = days_until(GOAL_BASE90_DATE)
+    runefest_days = days_until(GOAL_RUNEFEST_DATE)
+    max_days = days_until(GOAL_MAX_DATE)
 
-GOAL 1 - Base 90 all skills by {GOAL_BASE90_DATE} ({days_to_base90} days left):
-- Skills still under 90: {len(skills_under_90)}/{len(SKILLS)}
-- Remaining: {", ".join(format_skill_name(skill) for skill in skills_under_90) if skills_under_90 else "COMPLETE"}
+    base90_total = sum(base90_hours)
+    max_total = sum(max_hours)
 
-GOAL 2 - Total level {GOAL_RUNEFEST_LEVEL} by RuneFest {GOAL_RUNEFEST_DATE} ({days_to_runefest} days left):
-- Current total level: {total_level} (need {max(GOAL_RUNEFEST_LEVEL - total_level, 0)} more levels)
+    base90_rate = base90_total / base90_days if base90_days > 0 else None
+    runefest_rate = runefest_total / runefest_days if runefest_days > 0 else None
+    max_rate = max_total / max_days if max_days > 0 else None
 
-GOAL 3 - Max cape by {GOAL_MAX_DATE} ({days_to_max} days left):
-- Maxed: {len(skills_maxed)}/{len(SKILLS)} skills at 99
-
-Be specific, reference the deadlines, and prioritize whichever goal is most at risk."""
-
-    client = Groq(api_key=GROQ_API_KEY)
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=400,
+    content = "".join(
+        [
+            f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
+            f'Base 90 is <b>technically {classify_goal(base90_rate, base90_manual).lower()}</b> at '
+            f'<b>{base90_rate:.2f} hours/day</b> through {GOAL_BASE90_DATE}.'
+            f'{" Manual estimate still needed for: " + ", ".join(base90_manual) + "." if base90_manual else ""}'
+            f'</p>',
+            f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
+            f'RuneFest 2250 is <b>technically {classify_goal(runefest_rate, runefest_manual).lower()}</b> at '
+            f'<b>{runefest_rate:.2f} hours/day</b> and <b>{(levels_needed / runefest_days if runefest_days > 0 else 0):.2f} levels/day</b>.'
+            f'{" Manual estimate still needed for: " + ", ".join(runefest_manual) + "." if runefest_manual else ""}'
+            f'</p>',
+            f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
+            f'Max cape is <b>technically {classify_goal(max_rate, max_manual).lower()}</b> at '
+            f'<b>{max_rate:.2f} hours/day</b> through {GOAL_MAX_DATE}.'
+            f'{" Manual estimate still needed for: " + ", ".join(max_manual) + "." if max_manual else ""}'
+            f'</p>',
+        ]
     )
-    return response.choices[0].message.content
-
-
-def coaching_html(your_gains: dict, your_stats: dict, friends_data: dict, previous_all: dict) -> str:
-    try:
-        text = generate_ai_coaching(your_gains, your_stats, friends_data, previous_all)
-        paragraphs = "".join(
-            f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">{line.strip()}</p>'
-            for line in text.strip().splitlines()
-            if line.strip()
-        )
-        content = paragraphs
-    except Exception as error:  # noqa: BLE001 - this is an intentional user-facing fallback
-        content = f'<p style="color:#dc2626; font-size:13px;">Could not generate coaching: {error}</p>'
 
     return section("Daily Coaching Insight", content)
 
@@ -495,7 +597,7 @@ def build_html_email(your_gains: dict, your_stats: dict, friends_data: dict, pre
         + base90_html(your_stats, your_gains)
         + total_level_html(your_stats, your_gains)
         + max_progress_html(your_stats, your_gains)
-        + coaching_html(your_gains, your_stats, friends_data, previous_all)
+        + coaching_html(your_stats)
     )
 
     return f"""
