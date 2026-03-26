@@ -462,13 +462,12 @@ def base90_html(stats: dict, gains: dict) -> str:
   {row("Pace check", pace_status, muted=not remaining)}
 </table>"""
 
-    content += progress_bar(progress_pct, "#8b5cf6", required_pace_pct)
-    content += (
-        f'<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">'
-        f'<span>Actual {progress_pct:.1f}%</span><span>Pace {required_pace_pct:.1f}%</span></div>'
-    )
-
     if not remaining:
+        content += progress_bar(progress_pct, "#8b5cf6", required_pace_pct)
+        content += (
+            f'<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">'
+            f'<span>Actual {progress_pct:.1f}%</span><span>Pace {required_pace_pct:.1f}%</span></div>'
+        )
         content += '<div style="margin-top:8px; font-size:14px; color:#16a34a; font-weight:700;">Base 90 complete.</div>'
         return section("Goal 1 - Base 90 All Skills", content)
 
@@ -490,6 +489,12 @@ def base90_html(stats: dict, gains: dict) -> str:
   </table>
   {progress_bar(percent, bar_color)}
 </div>"""
+
+    content += progress_bar(progress_pct, "#8b5cf6", required_pace_pct)
+    content += (
+        f'<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">'
+        f'<span>Actual {progress_pct:.1f}%</span><span>Pace {required_pace_pct:.1f}%</span></div>'
+    )
 
     return section("Goal 1 - Base 90 All Skills", content)
 
@@ -516,12 +521,7 @@ def total_level_html(stats: dict, gains: dict) -> str:
   {row("Estimated grind", f"{estimated_hours:.1f} hours" if levels_needed > 0 else "Complete")}
   {row("Required pace", f"{hours_per_day:.2f} h/day" if levels_needed > 0 else "Complete")}
   {row("Pace check", pace_status)}
-</table>
-{progress_bar(progress_pct, "#3b82f6", required_pace_pct)}
-<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">
-  <span>Actual {progress_pct:.1f}%</span>
-  <span>Pace {required_pace_pct:.1f}%</span>
-</div>"""
+</table>"""
 
     if levels_needed <= 0:
         content += '<div style="font-size:14px; color:#16a34a; font-weight:700;">RuneFest goal achieved.</div>'
@@ -544,6 +544,12 @@ def total_level_html(stats: dict, gains: dict) -> str:
                 f'<div style="font-size:12px; color:#374151; padding:2px 0;">'
                 f'&bull; {format_skill_name(skill)}: +{xp:,} xp (Lv{stats[skill]["level"]})</div>'
             )
+
+    content += progress_bar(progress_pct, "#3b82f6", required_pace_pct)
+    content += (
+        f'<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">'
+        f'<span>Actual {progress_pct:.1f}%</span><span>Pace {required_pace_pct:.1f}%</span></div>'
+    )
 
     return section(f"Goal 2 - Total Level {GOAL_RUNEFEST_LEVEL} by RuneFest", content)
 
@@ -585,12 +591,7 @@ def max_progress_html(stats: dict, gains: dict) -> str:
   {row("Estimated grind", f"{estimated_hours:.1f} hours" if remaining else "Complete")}
   {row("Required pace", f"{hours_per_day:.2f} h/day" if hours_per_day is not None else "Manual estimate")}
   {row("Pace check", pace_status)}
-</table>
-{progress_bar(progress_pct, "#ec4899", required_pace_pct)}
-<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">
-  <span>Actual {progress_pct:.1f}%</span>
-  <span>Pace {required_pace_pct:.1f}%</span>
-</div>"""
+</table>"""
 
     if maxed:
         content += '<div style="margin: 6px 0 10px;">'
@@ -598,6 +599,11 @@ def max_progress_html(stats: dict, gains: dict) -> str:
         content += "</div>"
 
     if not remaining:
+        content += progress_bar(progress_pct, "#ec4899", required_pace_pct)
+        content += (
+            f'<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">'
+            f'<span>Actual {progress_pct:.1f}%</span><span>Pace {required_pace_pct:.1f}%</span></div>'
+        )
         content += '<div style="font-size:14px; color:#16a34a; font-weight:700; margin-top:8px;">Maxed.</div>'
         return section("Goal 3 - Max Cape by 33rd Birthday", content)
 
@@ -613,6 +619,12 @@ def max_progress_html(stats: dict, gains: dict) -> str:
   </div>
   {progress_bar(skill_percent, "#ec4899")}
 </div>"""
+
+    content += progress_bar(progress_pct, "#ec4899", required_pace_pct)
+    content += (
+        f'<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">'
+        f'<span>Actual {progress_pct:.1f}%</span><span>Pace {required_pace_pct:.1f}%</span></div>'
+    )
 
     return section("Goal 3 - Max Cape by 33rd Birthday", content)
 
