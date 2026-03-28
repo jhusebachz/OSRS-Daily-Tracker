@@ -16,6 +16,8 @@ This project pulls fresh hiscores from the official OSRS hiscore API, compares t
   - Total level `2250` by RuneFest
   - Max cape by your 33rd birthday
 - Projects goal pace from expected hourly XP rates instead of sample daily gain assumptions
+- Treats Slayer-trained combat skills as accounted-for zero-hour progress instead of manual-estimate gaps
+- Uses only On track, Tight, and Off track pace statuses in the daily report
 - Measures actual goal progress from a fixed `2026-03-25` baseline
 - Draws pace-check bars so each goal shows actual progress versus where the account should be by today
 - Sends a styled HTML email summary
@@ -129,7 +131,7 @@ Those values are defined directly in [`main.py`](./main.py), so the repo can be 
 
 The daily report now evaluates each goal in two ways:
 
-- estimated grind hours remaining based on expected hourly XP rates
+- estimated grind hours remaining based on expected hourly XP rates, including Slayer-trained combat skills that are intentionally treated as zero-hour side progress
 - actual progress since `2026-03-25` compared with the pace required to hit the deadline
 
 ## Notes
