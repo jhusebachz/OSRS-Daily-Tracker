@@ -22,7 +22,7 @@ import requests
 
 
 USERNAME = "jhusebachz"
-FRIENDS = ["mufkr", "kingxdabber", "beefmissle13", "hedith"]
+FRIENDS = ["mufkr", "beefmissle13", "kingxdabber", "hedith"]
 
 DATA_FILE = "data/last_stats.json"
 
@@ -199,15 +199,18 @@ def days_until(target_date: date) -> int:
 
 def projected_hours(skill: str, remaining_xp: int) -> tuple[float | None, str]:
     plan = GOAL_TRAINING_PLANS.get(skill)
-    if not plan or plan["xp_per_hour"] <= 0:
-        return None, plan["mode"] if plan else "manual estimate"
+    if not plan:
+        return None, "manual estimate"
+    if plan["xp_per_hour"] <= 0:
+        if plan["mode"] == "trained via Slayer":
+            return 0.0, plan["mode"]
+        return None, plan["mode"]
 
     return remaining_xp / plan["xp_per_hour"], f'{plan["xp_per_hour"]:,} xp/hr ({plan["mode"]})'
 
 
 def classify_goal(hours_per_day: float | None, manual_skills: list[str]) -> str:
-    if manual_skills:
-        return "Needs manual lane"
+    _ = manual_skills
     if hours_per_day is None:
         return "Off track"
     if hours_per_day <= 1.5:
@@ -224,8 +227,6 @@ def describe_goal_status(status: str) -> str:
         return "looks tight"
     if status == "Off track":
         return "looks off track"
-    if status == "Needs manual lane":
-        return "needs a manual estimate"
     return "needs review"
 
 
@@ -270,7 +271,7 @@ def build_runefest_projection(stats: dict, levels_needed: int) -> tuple[float, i
                 continue
 
             plan = GOAL_TRAINING_PLANS.get(skill)
-            if not plan or plan["xp_per_hour"] <= 0 or projected[skill]["level"] >= MAX_SKILL_LEVEL:
+            if not plan or projected[skill]["level"] >= MAX_SKILL_LEVEL:
                 continue
 
             next_level = projected[skill]["level"] + 1
@@ -278,7 +279,13 @@ def build_runefest_projection(stats: dict, levels_needed: int) -> tuple[float, i
             if remaining_xp <= 0:
                 continue
 
-            level_hours = remaining_xp / plan["xp_per_hour"]
+            if plan["xp_per_hour"] > 0:
+                level_hours = remaining_xp / plan["xp_per_hour"]
+            elif is_slayer_tracked_skill(skill):
+                level_hours = 0
+            else:
+                continue
+
             if best_hours is None or level_hours < best_hours:
                 best_skill = skill
                 best_hours = level_hours
@@ -528,11 +535,7 @@ def total_level_html(stats: dict, gains: dict) -> str:
     else:
         levels_per_day = round(levels_needed / days_left, 2)
         content += f'<div style="font-size:12px; color:#6b7280; margin-top:4px;">Need <b>{levels_per_day}</b> levels/day to hit {GOAL_RUNEFEST_LEVEL} in time</div>'
-        if manual_skills:
-            content += (
-                f'<div style="font-size:12px; color:#6b7280; margin-top:4px;">'
-                f'Manual estimate still needed for: {", ".join(manual_skills)}</div>'
-            )
+
 
     active = [(skill, gains.get(skill, 0)) for skill in SKILLS if skill in stats and gains.get(skill, 0) > 0]
     active.sort(key=lambda item: item[1], reverse=True)
@@ -677,17 +680,17 @@ def coaching_html(your_stats: dict) -> str:
             f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
             f'Base 90 <b>{describe_goal_status(classify_goal(base90_rate, base90_manual))}</b> at '
             f'<b>{base90_rate:.2f} hours/day</b> through {GOAL_BASE90_DATE}.'
-            f'{" Manual estimate still needed for: " + ", ".join(base90_manual) + "." if base90_manual else ""}'
+
             f'</p>',
             f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
             f'RuneFest 2250 <b>{describe_goal_status(classify_goal(runefest_rate, runefest_manual))}</b> at '
             f'<b>{runefest_rate:.2f} hours/day</b> and <b>{(levels_needed / runefest_days if runefest_days > 0 else 0):.2f} levels/day</b>.'
-            f'{" Manual estimate still needed for: " + ", ".join(runefest_manual) + "." if runefest_manual else ""}'
+
             f'</p>',
             f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
             f'Max cape <b>{describe_goal_status(classify_goal(max_rate, max_manual))}</b> at '
             f'<b>{max_rate:.2f} hours/day</b> through {GOAL_MAX_DATE}.'
-            f'{" Manual estimate still needed for: " + ", ".join(max_manual) + "." if max_manual else ""}'
+
             f'</p>',
         ]
     )
