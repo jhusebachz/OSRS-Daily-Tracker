@@ -274,17 +274,15 @@ def build_runefest_projection(stats: dict, levels_needed: int) -> tuple[float, i
             if not plan or projected[skill]["level"] >= MAX_SKILL_LEVEL:
                 continue
 
+            if is_slayer_tracked_skill(skill):
+                continue
+
             next_level = projected[skill]["level"] + 1
             remaining_xp = max(level_to_xp(next_level) - projected[skill]["experience"], 0)
             if remaining_xp <= 0:
                 continue
 
-            if plan["xp_per_hour"] > 0:
-                level_hours = remaining_xp / plan["xp_per_hour"]
-            elif is_slayer_tracked_skill(skill):
-                level_hours = 0
-            else:
-                continue
+            level_hours = remaining_xp / plan["xp_per_hour"]
 
             if best_hours is None or level_hours < best_hours:
                 best_skill = skill
