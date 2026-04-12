@@ -22,7 +22,7 @@ import requests
 
 
 USERNAME = "jhusebachz"
-FRIENDS = ["mufkr", "beefmissle13", "kingxdabber", "hedith"]
+FRIENDS = ["gwahpy", "beefmissle13", "kingxdabber", "hedith"]
 
 DATA_FILE = "data/last_stats.json"
 
