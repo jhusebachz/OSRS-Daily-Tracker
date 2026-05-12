@@ -12,7 +12,7 @@ This project pulls fresh hiscores from the official OSRS hiscore API, compares t
 - Saves the latest snapshot to [`data/last_stats.json`](./data/last_stats.json)
 - Calculates day-over-day XP gains from the last saved snapshot
 - Tracks progress against three personal goals:
-  - Base 90 all skills
+  - Base 92s with Runecrafting at 90 by RuneFest
   - Total level `2250` by RuneFest
   - Max cape by your 33rd birthday
 - Projects goal pace from expected hourly XP rates instead of sample daily gain assumptions
@@ -123,7 +123,7 @@ python main.py
 
 The script currently measures progress against:
 
-- `Base 90 all skills` by `2026-05-22`
+- `Base 92s` with `Runecrafting 90` by `2026-10-03`
 - `Total level 2250` by `2026-10-03`
 - `Max cape` by `2027-03-15`
 

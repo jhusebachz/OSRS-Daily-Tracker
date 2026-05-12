@@ -26,7 +26,7 @@ FRIENDS = ["gwahpy", "beefmissle13", "kingxdabber", "hedith"]
 
 DATA_FILE = "data/last_stats.json"
 
-GOAL_BASE90_DATE = date(2026, 5, 22)
+GOAL_ONE_DATE = date(2026, 10, 3)
 GOAL_RUNEFEST_DATE = date(2026, 10, 3)
 GOAL_MAX_DATE = date(2027, 3, 15)
 GOAL_PROGRESS_START = date(2026, 3, 25)
@@ -119,6 +119,10 @@ GOAL_PROGRESS_BASELINE = {
     "construction": {"level": 90, "experience": 5361184},
     "sailing": {"level": 98, "experience": 12303326},
 }
+
+
+def goal_one_target_level(skill: str) -> int:
+    return 90 if skill == "runecraft" else 92
 
 
 def format_skill_name(skill: str) -> str:
@@ -356,11 +360,11 @@ def goal_progress_pct(stats: dict, target: str) -> float:
         _, current_xp, _ = build_runefest_projection(stats, current_levels_needed)
         return clamp_pct(((baseline_xp - current_xp) / baseline_xp) * 100) if baseline_xp > 0 else 100.0
 
-    goal_level = 90 if target == "base90" else 99
     baseline_needed = 0
     current_remaining = 0
 
     for skill in SKILLS:
+        goal_level = goal_one_target_level(skill) if target == "basegoal" else 99
         baseline = GOAL_PROGRESS_BASELINE[skill]
         if baseline["level"] >= goal_level:
             continue
@@ -427,11 +431,10 @@ def friend_comparison_html(your_gains: dict, friends_data: dict, previous_all: d
     return section("Daily XP - You vs Friends", rows_html)
 
 
-def base90_html(stats: dict, gains: dict) -> str:
-    goal_xp = level_to_xp(90)
-    days_left = days_until(GOAL_BASE90_DATE)
-    progress_pct = goal_progress_pct(stats, "base90")
-    required_pace_pct = pace_pct(GOAL_BASE90_DATE)
+def goal_one_html(stats: dict, gains: dict) -> str:
+    days_left = days_until(GOAL_ONE_DATE)
+    progress_pct = goal_progress_pct(stats, "basegoal")
+    required_pace_pct = pace_pct(GOAL_ONE_DATE)
 
     completed = []
     remaining = []
@@ -440,28 +443,31 @@ def base90_html(stats: dict, gains: dict) -> str:
         if skill not in stats:
             continue
 
-        if stats[skill]["level"] >= 90:
+        target_level = goal_one_target_level(skill)
+
+        if stats[skill]["level"] >= target_level:
             completed.append(skill)
             continue
 
         current_xp = stats[skill]["experience"]
+        goal_xp = level_to_xp(target_level)
         remaining_xp = goal_xp - current_xp
         percent = round(current_xp / goal_xp * 100, 1)
         hours_left, rate_text = projected_hours(skill, remaining_xp)
-        remaining.append((skill, stats[skill]["level"], percent, remaining_xp, hours_left, rate_text))
+        remaining.append((skill, stats[skill]["level"], target_level, percent, remaining_xp, hours_left, rate_text))
 
-    remaining.sort(key=lambda item: item[2], reverse=True)
-    estimated_hours = sum(item[4] for item in remaining if item[4] is not None)
+    remaining.sort(key=lambda item: item[3], reverse=True)
+    estimated_hours = sum(item[5] for item in remaining if item[5] is not None)
     manual_skills = [
-        format_skill_name(item[0]) for item in remaining if item[4] is None and not is_slayer_tracked_skill(item[0])
+        format_skill_name(item[0]) for item in remaining if item[5] is None and not is_slayer_tracked_skill(item[0])
     ]
     hours_per_day = estimated_hours / days_left if days_left > 0 else None
     pace_status = classify_goal(hours_per_day, manual_skills)
 
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
-  {row("Deadline", f"{GOAL_BASE90_DATE} ({days_left} days left)")}
-  {row("Skills at 90+", f"{len(completed)}/{len(SKILLS)}", muted=not remaining)}
+  {row("Deadline", f"{GOAL_ONE_DATE} - RuneFest ({days_left} days left)")}
+  {row("Skills at target+", f"{len(completed)}/{len(SKILLS)}", muted=not remaining)}
   {row("Estimated grind", f"{estimated_hours:.1f} hours" if remaining else "Complete", muted=not remaining)}
   {row("Required pace", f"{hours_per_day:.2f} h/day" if hours_per_day is not None else "Manual estimate", muted=not remaining)}
   {row("Pace check", pace_status, muted=not remaining)}
@@ -473,19 +479,19 @@ def base90_html(stats: dict, gains: dict) -> str:
             f'<div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-top:2px;">'
             f'<span>Actual {progress_pct:.1f}%</span><span>Pace {required_pace_pct:.1f}%</span></div>'
         )
-        content += '<div style="margin-top:8px; font-size:14px; color:#16a34a; font-weight:700;">Base 90 complete.</div>'
-        return section("Goal 1 - Base 90 All Skills", content)
+        content += '<div style="margin-top:8px; font-size:14px; color:#16a34a; font-weight:700;">Base 92s goal complete.</div>'
+        return section("Goal 1 - Base 92s (Runecrafting 90) by RuneFest", content)
 
     content += '<div style="margin-top:10px; font-size:12px; font-weight:700; color:#374151; text-transform:uppercase; letter-spacing:.04em;">Still needed</div>'
 
-    for skill, level, percent, remaining_xp, hours_left, rate_text in remaining:
+    for skill, level, target_level, percent, remaining_xp, hours_left, rate_text in remaining:
         bar_color = "#f59e0b" if percent >= 80 else "#8b5cf6"
         content += f"""
 <div style="margin: 6px 0;">
   <table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px; color:#374151;">
     <tr>
       <td style="padding:0; color:#374151;">
-        <b>{format_skill_name(skill)}</b> Lv{level}
+        <b>{format_skill_name(skill)}</b> Lv{level} / {target_level}
       </td>
       <td style="padding:0 0 0 16px; color:#6b7280; text-align:right; white-space:nowrap;">
         {percent}% &middot; {remaining_xp:,} xp &middot; {f"{hours_left:.1f}h" if hours_left is not None else rate_text}
@@ -501,7 +507,7 @@ def base90_html(stats: dict, gains: dict) -> str:
         f'<span>Actual {progress_pct:.1f}%</span><span>Pace {required_pace_pct:.1f}%</span></div>'
     )
 
-    return section("Goal 1 - Base 90 All Skills", content)
+    return section("Goal 1 - Base 92s (Runecrafting 90) by RuneFest", content)
 
 
 def total_level_html(stats: dict, gains: dict) -> str:
@@ -631,8 +637,8 @@ def max_progress_html(stats: dict, gains: dict) -> str:
 
 
 def coaching_html(your_stats: dict) -> str:
-    base90_hours = []
-    base90_manual = []
+    goal_one_hours = []
+    goal_one_manual = []
     max_hours = []
     max_manual = []
 
@@ -640,14 +646,16 @@ def coaching_html(your_stats: dict) -> str:
         if skill not in your_stats:
             continue
 
-        if your_stats[skill]["level"] < 90:
-            remaining_xp = max(level_to_xp(90) - your_stats[skill]["experience"], 0)
+        goal_one_level = goal_one_target_level(skill)
+
+        if your_stats[skill]["level"] < goal_one_level:
+            remaining_xp = max(level_to_xp(goal_one_level) - your_stats[skill]["experience"], 0)
             hours_left, _ = projected_hours(skill, remaining_xp)
             if hours_left is None:
                 if not is_slayer_tracked_skill(skill):
-                    base90_manual.append(format_skill_name(skill))
+                    goal_one_manual.append(format_skill_name(skill))
             else:
-                base90_hours.append(hours_left)
+                goal_one_hours.append(hours_left)
 
         if your_stats[skill]["level"] < 99:
             remaining_xp = max(level_to_xp(99) - your_stats[skill]["experience"], 0)
@@ -662,22 +670,22 @@ def coaching_html(your_stats: dict) -> str:
     levels_needed = max(GOAL_RUNEFEST_LEVEL - total_level, 0)
     runefest_total, _, runefest_manual = build_runefest_projection(your_stats, levels_needed)
 
-    base90_days = days_until(GOAL_BASE90_DATE)
+    goal_one_days = days_until(GOAL_ONE_DATE)
     runefest_days = days_until(GOAL_RUNEFEST_DATE)
     max_days = days_until(GOAL_MAX_DATE)
 
-    base90_total = sum(base90_hours)
+    goal_one_total = sum(goal_one_hours)
     max_total = sum(max_hours)
 
-    base90_rate = base90_total / base90_days if base90_days > 0 else None
+    goal_one_rate = goal_one_total / goal_one_days if goal_one_days > 0 else None
     runefest_rate = runefest_total / runefest_days if runefest_days > 0 else None
     max_rate = max_total / max_days if max_days > 0 else None
 
     content = "".join(
         [
             f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
-            f'Base 90 <b>{describe_goal_status(classify_goal(base90_rate, base90_manual))}</b> at '
-            f'<b>{base90_rate:.2f} hours/day</b> through {GOAL_BASE90_DATE}.'
+            f'Base 92s <b>{describe_goal_status(classify_goal(goal_one_rate, goal_one_manual))}</b> at '
+            f'<b>{goal_one_rate:.2f} hours/day</b> through {GOAL_ONE_DATE}.'
 
             f'</p>',
             f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
@@ -728,7 +736,7 @@ def build_html_email(your_gains: dict, your_stats: dict, friends_data: dict, pre
     body = (
         header_section
         + friend_comparison_html(your_gains, friends_data, previous_all)
-        + base90_html(your_stats, your_gains)
+        + goal_one_html(your_stats, your_gains)
         + total_level_html(your_stats, your_gains)
         + max_progress_html(your_stats, your_gains)
         + coaching_html(your_stats)
