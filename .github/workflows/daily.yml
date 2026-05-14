@@ -2,7 +2,8 @@ name: Daily OSRS Tracker
 
 on:
   schedule:
-    - cron: "30 12 * * *"
+    # Run earlier so the snapshot commit and email have buffer room before downstream app refresh windows.
+    - cron: "30 8 * * *"
   workflow_dispatch:
 
 permissions:

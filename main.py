@@ -25,6 +25,7 @@ USERNAME = "jhusebachz"
 FRIENDS = ["gwahpy", "beefmissle13", "kingxdabber", "hedith"]
 
 DATA_FILE = "data/last_stats.json"
+METADATA_KEY = "_meta"
 
 GOAL_ONE_DATE = date(2026, 10, 3)
 GOAL_RUNEFEST_DATE = date(2026, 10, 3)
@@ -92,6 +93,34 @@ GOAL_TRAINING_PLANS = {
     "thieving": {"xp_per_hour": 180000, "mode": "active"},
     "sailing": {"xp_per_hour": 60000, "mode": "afk"},
 }
+# Directional XP/hour estimates for turning daily XP gains into a simple effective-hours signal.
+# Tune these as your preferred training methods change.
+EFFECTIVE_XP_PER_HOUR_BY_SKILL = {
+    "attack": 80000,
+    "strength": 90000,
+    "defence": 80000,
+    "ranged": 70000,
+    "prayer": 150000,
+    "magic": 90000,
+    "runecraft": 50000,
+    "construction": 220000,
+    "hitpoints": 45000,
+    "agility": 50000,
+    "herblore": 200000,
+    "thieving": 180000,
+    "crafting": 200000,
+    "fletching": 180000,
+    "slayer": 40000,
+    "hunter": 70000,
+    "mining": 40000,
+    "smithing": 220000,
+    "fishing": 40000,
+    "cooking": 250000,
+    "firemaking": 250000,
+    "woodcutting": 70000,
+    "farming": 120000,
+    "sailing": 60000,
+}
 GOAL_PROGRESS_BASELINE = {
     "overall": {"level": 2203, "experience": 173773255},
     "attack": {"level": 91, "experience": 6122415},
@@ -131,6 +160,54 @@ def format_skill_name(skill: str) -> str:
     return skill.capitalize()
 
 
+def build_effective_hours_summary(
+    gains_by_skill: dict[str, int], xp_per_hour_by_skill: dict[str, int] | None = None
+) -> dict:
+    rates = xp_per_hour_by_skill or EFFECTIVE_XP_PER_HOUR_BY_SKILL
+    by_skill: dict[str, float] = {}
+    skipped_skills: list[str] = []
+
+    for skill, xp_gained in gains_by_skill.items():
+        if skill == "overall" or xp_gained <= 0:
+            continue
+
+        xp_per_hour = rates.get(skill)
+        if not xp_per_hour or xp_per_hour <= 0:
+            skipped_skills.append(skill)
+            continue
+
+        by_skill[skill] = xp_gained / xp_per_hour
+
+    return {
+        "totalHours": round(sum(by_skill.values()), 4),
+        "bySkill": {skill: round(hours, 4) for skill, hours in by_skill.items()},
+        "skippedSkills": sorted(skipped_skills),
+    }
+
+
+def get_top_effective_hour_contributors(
+    effective_hours_summary: dict, limit: int = 3
+) -> list[tuple[str, float]]:
+    return sorted(
+        (
+            (skill, hours)
+            for skill, hours in effective_hours_summary.get("bySkill", {}).items()
+            if hours > 0
+        ),
+        key=lambda item: item[1],
+        reverse=True,
+    )[:limit]
+
+
+def build_snapshot_metadata(username: str, effective_hours_summary: dict) -> dict:
+    return {
+        "generatedAt": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "effectiveHours": {
+            username: effective_hours_summary,
+        },
+    }
+
+
 def fetch_player(username: str) -> dict:
     """Fetch one player's official OSRS hiscores from the lite CSV endpoint."""
     safe_name = username.replace(" ", "_")
@@ -167,9 +244,9 @@ def load_previous() -> dict:
         return json.load(file)
 
 
-def save_current(your_stats: dict, friends_data: dict) -> None:
+def save_current(your_stats: dict, friends_data: dict, metadata: dict) -> None:
     os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-    all_stats = {USERNAME: your_stats, **friends_data}
+    all_stats = {METADATA_KEY: metadata, USERNAME: your_stats, **friends_data}
 
     with open(DATA_FILE, "w", encoding="utf-8") as file:
         json.dump(all_stats, file)
@@ -704,9 +781,12 @@ def coaching_html(your_stats: dict) -> str:
     return section("Daily Coaching Insight", content)
 
 
-def build_html_email(your_gains: dict, your_stats: dict, friends_data: dict, previous_all: dict) -> str:
+def build_html_email(
+    your_gains: dict, your_stats: dict, friends_data: dict, previous_all: dict, effective_hours_summary: dict
+) -> str:
     your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
     today = datetime.now().strftime("%B %d, %Y")
+    top_effective_hours = get_top_effective_hour_contributors(effective_hours_summary)
 
     top_gains = sorted(
         ((skill, your_gains[skill]) for skill in SKILLS if your_gains.get(skill, 0) > 0),
@@ -723,6 +803,15 @@ def build_html_email(your_gains: dict, your_stats: dict, friends_data: dict, pre
     else:
         top_gains_html = '<div style="font-size:13px; color:#9ca3af;">No xp gained today</div>'
 
+    if top_effective_hours:
+        top_effective_hours_html = "".join(
+            f'<div style="font-size:12px; color:rgba(255,255,255,0.78); padding:2px 0;">'
+            f'<b>{format_skill_name(skill)}</b>: {hours:.1f}h</div>'
+            for skill, hours in top_effective_hours
+        )
+    else:
+        top_effective_hours_html = ""
+
     header_section = f"""
 <div style="background: linear-gradient(135deg, #1e1b4b 0%, #4c1d95 100%);
      border-radius: 12px; padding: 28px 24px; margin-bottom: 8px; color: white;">
@@ -730,6 +819,10 @@ def build_html_email(your_gains: dict, your_stats: dict, friends_data: dict, pre
        opacity: 0.7; margin-bottom: 6px;">OSRS Daily Report</div>
   <div style="font-size: 26px; font-weight: 800; margin-bottom: 4px;">{today}</div>
   <div style="font-size: 28px; font-weight: 800; margin-top: 16px;">{your_total_xp:,} <span style="font-size:14px; font-weight:400; opacity:0.8;">XP gained today</span></div>
+  <div style="margin-top: 12px; font-size: 14px; color: rgba(255,255,255,0.92);">
+    Effective hours played today: <b>{effective_hours_summary.get("totalHours", 0):.1f} hours</b>
+  </div>
+  {f'<div style="margin-top: 10px;">{top_effective_hours_html}</div>' if top_effective_hours_html else ''}
   <div style="margin-top: 14px;">{top_gains_html.replace('color:#374151', 'color:rgba(255,255,255,0.85)').replace('color:#9ca3af', 'color:rgba(255,255,255,0.5)')}</div>
 </div>"""
 
@@ -773,13 +866,23 @@ def send_email(html_content: str, plain_summary: str) -> None:
         server.send_message(message)
 
 
-def build_plain_text(your_gains: dict, friends_data: dict, previous_all: dict) -> str:
+def build_plain_text(your_gains: dict, friends_data: dict, previous_all: dict, effective_hours_summary: dict) -> str:
     your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
     lines = [
         f"OSRS Daily Report - {datetime.now().strftime('%Y-%m-%d')}",
         f"Total XP Today: {your_total_xp:,}",
+        f"Effective hours played today: {effective_hours_summary.get('totalHours', 0):.1f} hours",
         "",
     ]
+    top_effective_hours = get_top_effective_hour_contributors(effective_hours_summary)
+
+    if top_effective_hours:
+        lines.append("Top effective-hour contributors:")
+        lines.extend(
+            f"- {format_skill_name(skill)}: {hours:.1f}h"
+            for skill, hours in top_effective_hours
+        )
+        lines.append("")
 
     for friend in FRIENDS:
         if friend not in friends_data:
@@ -813,14 +916,22 @@ def main() -> None:
     your_stats, friends_data = fetch_all_stats()
     previous_all = load_previous()
     your_gains = calculate_gains(previous_all, USERNAME, your_stats)
+    effective_hours_summary = build_effective_hours_summary(your_gains)
+    snapshot_metadata = build_snapshot_metadata(USERNAME, effective_hours_summary)
 
-    html_email = build_html_email(your_gains, your_stats, friends_data, previous_all)
-    plain_email = build_plain_text(your_gains, friends_data, previous_all)
+    if effective_hours_summary["skippedSkills"]:
+        print(
+            "Skipped effective-hours estimates for skills without configured XP/hour assumptions: "
+            + ", ".join(format_skill_name(skill) for skill in effective_hours_summary["skippedSkills"])
+        )
+
+    html_email = build_html_email(your_gains, your_stats, friends_data, previous_all, effective_hours_summary)
+    plain_email = build_plain_text(your_gains, friends_data, previous_all, effective_hours_summary)
 
     print(plain_email)
 
     send_email(html_email, plain_email)
-    save_current(your_stats, friends_data)
+    save_current(your_stats, friends_data, snapshot_metadata)
 
 
 if __name__ == "__main__":
