@@ -14,9 +14,10 @@ import json
 import os
 import smtplib
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -26,6 +27,8 @@ FRIENDS = ["gwahpy", "beefmissle13", "kingxdabber", "hedith"]
 
 DATA_FILE = "data/last_stats.json"
 METADATA_KEY = "_meta"
+TRACKER_TIME_ZONE = "America/New_York"
+TRACKER_ZONE = ZoneInfo(TRACKER_TIME_ZONE)
 
 GOAL_ONE_DATE = date(2026, 10, 3)
 GOAL_RUNEFEST_DATE = date(2026, 10, 3)
@@ -150,6 +153,20 @@ GOAL_PROGRESS_BASELINE = {
 }
 
 
+def get_tracker_now() -> datetime:
+    return datetime.now(TRACKER_ZONE)
+
+
+def get_report_date_key(now: datetime | None = None) -> str:
+    return (now or get_tracker_now()).strftime("%Y-%m-%d")
+
+
+def get_week_start_date_key(report_date_key: str) -> str:
+    report_day = date.fromisoformat(report_date_key)
+    week_start = report_day - timedelta(days=report_day.weekday())
+    return week_start.isoformat()
+
+
 def goal_one_target_level(skill: str) -> int:
     return 90 if skill == "runecraft" else 92
 
@@ -199,14 +216,71 @@ def get_top_effective_hour_contributors(
     )[:limit]
 
 
-def build_snapshot_metadata(username: str, effective_hours_summary: dict, last_seven_days_summary: dict) -> dict:
+def build_player_daily_summary(gains_by_skill: dict[str, int], stats: dict) -> dict:
+    total_xp = sum(value for skill, value in gains_by_skill.items() if skill in SKILLS)
+    top_skills = [
+        {
+            "skill": skill,
+            "xp": xp,
+            "level": stats[skill]["level"],
+        }
+        for skill, xp in sorted(
+            ((skill, xp) for skill, xp in gains_by_skill.items() if skill in SKILLS and xp > 0),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:5]
+        if skill in stats
+    ]
+
     return {
-        "generatedAt": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "totalXp": total_xp,
+        "topSkills": top_skills,
+    }
+
+
+def build_daily_summary(
+    username: str, your_gains: dict[str, int], your_stats: dict, friends_data: dict, previous_all: dict
+) -> dict:
+    by_player = {
+        username: build_player_daily_summary(your_gains, your_stats),
+    }
+    your_total_xp = by_player[username]["totalXp"]
+
+    for friend in FRIENDS:
+        if friend not in friends_data:
+            continue
+
+        friend_gains = calculate_gains(previous_all, friend, friends_data[friend])
+        friend_summary = build_player_daily_summary(friend_gains, friends_data[friend])
+        friend_summary["diff"] = your_total_xp - friend_summary["totalXp"]
+        by_player[friend] = friend_summary
+
+    return {
+        "byPlayer": by_player,
+    }
+
+
+def build_snapshot_metadata(
+    username: str,
+    effective_hours_summary: dict,
+    last_seven_days_summary: dict,
+    daily_summary: dict,
+    current_week_summary: dict,
+    report_date_key: str,
+) -> dict:
+    return {
+        "generatedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "timeZone": TRACKER_TIME_ZONE,
+        "reportDateKey": report_date_key,
+        "dailySummary": daily_summary,
         "effectiveHours": {
             username: effective_hours_summary,
         },
         "lastSevenDays": {
             username: last_seven_days_summary,
+        },
+        "currentWeek": {
+            username: current_week_summary,
         },
     }
 
@@ -248,6 +322,14 @@ def normalize_last_seven_days_entry(entry: dict) -> dict | None:
 
     total_xp = entry.get("totalXp", 0)
     effective_hours = entry.get("effectiveHours", 0)
+    raw_gains_by_skill = entry.get("gainsBySkill", {})
+    gains_by_skill = {}
+    if isinstance(raw_gains_by_skill, dict):
+        gains_by_skill = {
+            skill: int(xp)
+            for skill, xp in raw_gains_by_skill.items()
+            if isinstance(skill, str) and isinstance(xp, (int, float)) and xp >= 0
+        }
 
     return {
         "dateKey": date_key,
@@ -255,6 +337,7 @@ def normalize_last_seven_days_entry(entry: dict) -> dict | None:
         "totalXp": max(int(total_xp), 0) if isinstance(total_xp, (int, float)) else 0,
         "effectiveHours": max(float(effective_hours), 0.0) if isinstance(effective_hours, (int, float)) else 0.0,
         "topSkills": normalized_top_skills[:3],
+        "gainsBySkill": gains_by_skill,
     }
 
 
@@ -266,6 +349,11 @@ def build_last_seven_days_entry(report_date: str, gains: dict[str, int], effecti
         "totalXp": total_xp,
         "effectiveHours": round(float(effective_hours_summary.get("totalHours", 0)), 4),
         "topSkills": build_top_skill_entries(gains),
+        "gainsBySkill": {
+            skill: xp
+            for skill, xp in gains.items()
+            if skill in SKILLS and xp > 0
+        },
     }
 
 
@@ -294,7 +382,7 @@ def build_last_seven_days_summary(
     effective_hours_summary: dict,
     report_date: str | None = None,
 ) -> dict:
-    report_date_key = report_date or datetime.now().strftime("%Y-%m-%d")
+    report_date_key = report_date or get_report_date_key()
     previous_entries = (
         previous_all.get(METADATA_KEY, {})
         .get("lastSevenDays", {})
@@ -311,6 +399,103 @@ def build_last_seven_days_summary(
         *normalized_previous,
     ]
     return summarize_last_seven_days(merged_entries)
+
+
+def build_current_week_summary(
+    previous_all: dict,
+    username: str,
+    current_stats: dict,
+    report_date_key: str,
+    last_seven_days_summary: dict,
+) -> dict:
+    week_start_date_key = get_week_start_date_key(report_date_key)
+    current_week_entries = [
+        entry
+        for entry in last_seven_days_summary.get("days", [])
+        if isinstance(entry, dict) and isinstance(entry.get("dateKey"), str) and entry["dateKey"] >= week_start_date_key
+    ]
+    total_xp_from_history = sum(int(entry.get("totalXp", 0)) for entry in current_week_entries)
+    total_effective_hours = round(sum(float(entry.get("effectiveHours", 0)) for entry in current_week_entries), 4)
+    active_days = sum(
+        1
+        for entry in current_week_entries
+        if int(entry.get("totalXp", 0)) > 0 or float(entry.get("effectiveHours", 0)) > 0
+    )
+    gains_by_skill_from_history: dict[str, int] = {}
+    history_has_skill_detail = True
+
+    for entry in current_week_entries:
+        raw_gains_by_skill = entry.get("gainsBySkill", {})
+        if not isinstance(raw_gains_by_skill, dict):
+            history_has_skill_detail = False
+            continue
+
+        for skill, xp in raw_gains_by_skill.items():
+            if isinstance(skill, str) and isinstance(xp, (int, float)) and xp > 0:
+                gains_by_skill_from_history[skill] = gains_by_skill_from_history.get(skill, 0) + int(xp)
+
+    previous_weekly_summary = (
+        previous_all.get(METADATA_KEY, {})
+        .get("currentWeek", {})
+        .get(username, {})
+    )
+    previous_week_start = previous_weekly_summary.get("weekStartDateKey")
+    previous_baseline_date_key = previous_weekly_summary.get("baselineDateKey")
+    previous_baseline_overall_xp = previous_weekly_summary.get("baselineOverallXp")
+    previous_baseline_skill_xp = previous_weekly_summary.get("baselineSkillXp")
+    baseline_overall_xp: int
+    baseline_skill_xp: dict[str, int] | None = None
+
+    if (
+        previous_week_start == week_start_date_key
+        and isinstance(previous_baseline_overall_xp, (int, float))
+        and previous_baseline_overall_xp >= 0
+    ):
+        baseline_overall_xp = int(previous_baseline_overall_xp)
+        if isinstance(previous_baseline_skill_xp, dict):
+            baseline_skill_xp = {
+                skill: int(xp)
+                for skill, xp in previous_baseline_skill_xp.items()
+                if isinstance(skill, str) and isinstance(xp, (int, float)) and xp >= 0
+            }
+    else:
+        baseline_overall_xp = max(current_stats["overall"]["experience"] - total_xp_from_history, 0)
+        if history_has_skill_detail and gains_by_skill_from_history:
+            baseline_skill_xp = {
+                skill: max(current_stats[skill]["experience"] - gains_by_skill_from_history.get(skill, 0), 0)
+                for skill in SKILLS
+                if skill in current_stats
+            }
+
+    week_to_date_xp = max(current_stats["overall"]["experience"] - baseline_overall_xp, 0)
+    week_to_date_gains_by_skill = {}
+    if baseline_skill_xp:
+        week_to_date_gains_by_skill = {
+            skill: max(current_stats[skill]["experience"] - baseline_skill_xp.get(skill, current_stats[skill]["experience"]), 0)
+            for skill in SKILLS
+            if skill in current_stats
+        }
+
+    top_skills = build_top_skill_entries(week_to_date_gains_by_skill, limit=5) if week_to_date_gains_by_skill else []
+    if previous_week_start == week_start_date_key and isinstance(previous_baseline_date_key, str):
+        baseline_date_key = previous_baseline_date_key
+    else:
+        baseline_date_key = current_week_entries[-1]["dateKey"] if current_week_entries else report_date_key
+
+    print(f"Weekly baseline date: {baseline_date_key} (week starts {week_start_date_key})")
+    print(f"Week-to-date XP calculation: current {current_stats['overall']['experience']:,} - baseline {baseline_overall_xp:,} = {week_to_date_xp:,}")
+
+    return {
+        "weekStartDateKey": week_start_date_key,
+        "baselineDateKey": baseline_date_key,
+        "baselineOverallXp": baseline_overall_xp,
+        "baselineSkillXp": baseline_skill_xp or {},
+        "totalXp": week_to_date_xp,
+        "totalEffectiveHours": total_effective_hours,
+        "activeDays": active_days,
+        "daysTracked": len(current_week_entries),
+        "topSkills": top_skills,
+    }
 
 
 def fetch_player(username: str) -> dict:
@@ -349,12 +534,23 @@ def load_previous() -> dict:
         return json.load(file)
 
 
-def save_current(your_stats: dict, friends_data: dict, metadata: dict) -> None:
+def save_current(your_stats: dict, friends_data: dict, metadata: dict) -> bool:
     os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     all_stats = {METADATA_KEY: metadata, USERNAME: your_stats, **friends_data}
+    serialized = json.dumps(all_stats, ensure_ascii=False)
+    previous_serialized = None
+
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as file:
+            previous_serialized = file.read()
 
     with open(DATA_FILE, "w", encoding="utf-8") as file:
-        json.dump(all_stats, file)
+        file.write(serialized)
+
+    changed = previous_serialized != serialized
+    print(f"App data output path: {os.path.abspath(DATA_FILE)}")
+    print(f"App data file changed: {'yes' if changed else 'no'}")
+    return changed
 
 
 def calculate_gains(old_all: dict, username: str, current_stats: dict) -> dict[str, int]:
@@ -741,7 +937,7 @@ def total_level_html(stats: dict, gains: dict) -> str:
 <table width="100%" cellpadding="0" cellspacing="0">
   {row("Deadline", f"{GOAL_RUNEFEST_DATE} - RuneFest ({days_left} days left)")}
   {row("Current total level", f"{total_level:,} / {GOAL_RUNEFEST_LEVEL:,}")}
-  {row("Levels still needed", f"{effective_levels_left:.2f} effective")}
+  {row("Levels still needed", f"{effective_levels_left:.2f} effective levels")}
   {row("Estimated grind", f"{estimated_hours:.1f} hours" if levels_needed > 0 else "Complete")}
   {row("Required pace", f"{hours_per_day:.2f} h/day" if levels_needed > 0 else "Complete")}
   {row("Pace check", pace_status)}
@@ -750,11 +946,10 @@ def total_level_html(stats: dict, gains: dict) -> str:
     if levels_needed <= 0:
         content += '<div style="font-size:14px; color:#16a34a; font-weight:700;">RuneFest goal achieved.</div>'
     else:
-        levels_per_day = round(levels_needed / days_left, 2)
         content += (
             f'<div style="font-size:12px; color:#6b7280; margin-top:4px;">'
-            f'Need <b>{effective_levels_per_day:.2f}</b> effective levels/day to hit {GOAL_RUNEFEST_LEVEL} in time'
-            f' ({levels_per_day:.2f} full levels/day).</div>'
+            f'Need <b>{effective_levels_per_day:.2f}</b> effective levels/day to hit {GOAL_RUNEFEST_LEVEL} in time.'
+            f'</div>'
         )
 
 
@@ -839,7 +1034,7 @@ def max_progress_html(stats: dict, gains: dict) -> str:
 <div style="margin: 6px 0;">
   <div style="font-size:12px; color:#374151;">
     <b>{format_skill_name(skill)}</b> Lv{level}
-    <span style="color:#6b7280;"> Â· {remaining_xp:,} xp to 99 Â· {f"{hours_left:.1f}h" if hours_left is not None else rate_text}</span>
+    <span style="color:#6b7280;"> &middot; {remaining_xp:,} xp to 99 &middot; {f"{hours_left:.1f}h" if hours_left is not None else rate_text}</span>
   </div>
   {progress_bar(skill_percent, "#ec4899")}
 </div>"""
@@ -963,9 +1158,10 @@ def build_html_email(
     previous_all: dict,
     effective_hours_summary: dict,
     last_seven_days_summary: dict,
+    current_week_summary: dict,
 ) -> str:
     your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
-    today = datetime.now().strftime("%B %d, %Y")
+    today = get_tracker_now().strftime("%B %d, %Y")
     top_effective_hours = get_top_effective_hour_contributors(effective_hours_summary)
 
     top_gains = sorted(
@@ -1006,6 +1202,10 @@ def build_html_email(
     Last 7 days: <b>{last_seven_days_summary.get("totalXp", 0):,} xp</b> over
     <b>{last_seven_days_summary.get("totalEffectiveHours", 0):.1f} hours</b>
   </div>
+  <div style="margin-top: 6px; font-size: 13px; color: rgba(255,255,255,0.78);">
+    This week: <b>{current_week_summary.get("totalXp", 0):,} xp</b> over
+    <b>{current_week_summary.get("totalEffectiveHours", 0):.1f} hours</b>
+  </div>
   {f'<div style="margin-top: 10px;">{top_effective_hours_html}</div>' if top_effective_hours_html else ''}
   <div style="margin-top: 14px;">{top_gains_html.replace('color:#374151', 'color:rgba(255,255,255,0.85)').replace('color:#9ca3af', 'color:rgba(255,255,255,0.5)')}</div>
 </div>"""
@@ -1028,7 +1228,7 @@ def build_html_email(
   <div style="max-width: 600px; margin: 0 auto; padding: 24px 16px;">
     {body}
     <div style="text-align:center; font-size:11px; color:#9ca3af; margin-top:16px; padding-bottom:24px;">
-      {USERNAME} Â· OSRS Daily Tracker
+      {USERNAME} &middot; OSRS Daily Tracker
     </div>
   </div>
 </body>
@@ -1057,12 +1257,14 @@ def build_plain_text(
     previous_all: dict,
     effective_hours_summary: dict,
     last_seven_days_summary: dict,
+    current_week_summary: dict,
 ) -> str:
     your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
     lines = [
-        f"OSRS Daily Report - {datetime.now().strftime('%Y-%m-%d')}",
+        f"OSRS Daily Report - {get_report_date_key()}",
         f"Total XP Today: {your_total_xp:,}",
         f"Effective hours played today: {effective_hours_summary.get('totalHours', 0):.1f} hours",
+        f"This week: {current_week_summary.get('totalXp', 0):,} xp | {current_week_summary.get('totalEffectiveHours', 0):.1f} hours | {current_week_summary.get('activeDays', 0)} active days",
         f"Last 7 days: {last_seven_days_summary.get('totalXp', 0):,} xp | {last_seven_days_summary.get('totalEffectiveHours', 0):.1f} hours | {last_seven_days_summary.get('activeDays', 0)} active days",
         "",
     ]
@@ -1113,12 +1315,37 @@ def fetch_all_stats() -> tuple[dict, dict]:
 
 
 def main() -> None:
+    report_now = get_tracker_now()
+    report_date_key = get_report_date_key(report_now)
     your_stats, friends_data = fetch_all_stats()
     previous_all = load_previous()
     your_gains = calculate_gains(previous_all, USERNAME, your_stats)
     effective_hours_summary = build_effective_hours_summary(your_gains)
-    last_seven_days_summary = build_last_seven_days_summary(previous_all, USERNAME, your_gains, effective_hours_summary)
-    snapshot_metadata = build_snapshot_metadata(USERNAME, effective_hours_summary, last_seven_days_summary)
+    last_seven_days_summary = build_last_seven_days_summary(
+        previous_all,
+        USERNAME,
+        your_gains,
+        effective_hours_summary,
+        report_date_key,
+    )
+    daily_summary = build_daily_summary(USERNAME, your_gains, your_stats, friends_data, previous_all)
+    current_week_summary = build_current_week_summary(
+        previous_all,
+        USERNAME,
+        your_stats,
+        report_date_key,
+        last_seven_days_summary,
+    )
+    snapshot_metadata = build_snapshot_metadata(
+        USERNAME,
+        effective_hours_summary,
+        last_seven_days_summary,
+        daily_summary,
+        current_week_summary,
+        report_date_key,
+    )
+
+    print(f"Latest OSRS pull timestamp: {snapshot_metadata['generatedAt']} ({TRACKER_TIME_ZONE} report date {report_date_key})")
 
     if effective_hours_summary["skippedSkills"]:
         print(
@@ -1133,6 +1360,7 @@ def main() -> None:
         previous_all,
         effective_hours_summary,
         last_seven_days_summary,
+        current_week_summary,
     )
     plain_email = build_plain_text(
         your_gains,
@@ -1140,6 +1368,7 @@ def main() -> None:
         previous_all,
         effective_hours_summary,
         last_seven_days_summary,
+        current_week_summary,
     )
 
     print(plain_email)

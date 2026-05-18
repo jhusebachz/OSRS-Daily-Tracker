@@ -2,11 +2,37 @@
 from pathlib import Path
 
 from main import (
+    GOAL_PROGRESS_BASELINE,
+    SKILLS,
+    build_current_week_summary,
     build_effective_hours_summary,
+    build_html_email,
     build_last_seven_days_summary,
     build_plain_text,
+    build_snapshot_metadata,
     effective_levels_remaining,
 )
+
+
+def build_stats(skill_overrides=None, overall_overrides=None):
+    skill_overrides = skill_overrides or {}
+    overall_overrides = overall_overrides or {}
+    stats = {
+        "overall": {
+            "level": overall_overrides.get("level", GOAL_PROGRESS_BASELINE["overall"]["level"]),
+            "experience": overall_overrides.get("experience", GOAL_PROGRESS_BASELINE["overall"]["experience"]),
+        }
+    }
+
+    for skill in SKILLS:
+        baseline = GOAL_PROGRESS_BASELINE[skill]
+        overrides = skill_overrides.get(skill, {})
+        stats[skill] = {
+            "level": overrides.get("level", baseline["level"]),
+            "experience": overrides.get("experience", baseline["experience"]),
+        }
+
+    return stats
 
 
 class EffectiveHoursTests(unittest.TestCase):
@@ -68,7 +94,10 @@ class EffectiveHoursTests(unittest.TestCase):
     def test_plain_text_report_includes_effective_hours_line(self):
         report = build_plain_text(
             {"hunter": 98000, "overall": 98000},
-            {},
+            build_stats(
+                {"hunter": {"experience": GOAL_PROGRESS_BASELINE["hunter"]["experience"] + 98000}},
+                {"experience": GOAL_PROGRESS_BASELINE["overall"]["experience"] + 98000},
+            ),
             {},
             {
                 "totalHours": 1.4,
@@ -92,11 +121,142 @@ class EffectiveHoursTests(unittest.TestCase):
                     }
                 ],
             },
+            {
+                "weekStartDateKey": "2026-05-12",
+                "baselineDateKey": "2026-05-12",
+                "baselineOverallXp": GOAL_PROGRESS_BASELINE["overall"]["experience"],
+                "baselineSkillXp": {"hunter": GOAL_PROGRESS_BASELINE["hunter"]["experience"]},
+                "totalXp": 98000,
+                "totalEffectiveHours": 1.4,
+                "activeDays": 1,
+                "daysTracked": 1,
+                "topSkills": [{"skill": "hunter", "xp": 98000}],
+            },
         )
 
         self.assertIn("Effective hours played today: 1.4 hours", report)
+        self.assertIn("This week: 98,000 xp | 1.4 hours | 1 active days", report)
         self.assertIn("Last 7 days: 98,000 xp | 1.4 hours | 1 active days", report)
         self.assertIn("Last 7 day breakdown:", report)
+
+    def test_current_week_summary_uses_week_baseline_instead_of_latest_delta(self):
+        current_stats = build_stats(
+            {
+                "hunter": {"experience": GOAL_PROGRESS_BASELINE["hunter"]["experience"] + 70000},
+                "slayer": {"experience": GOAL_PROGRESS_BASELINE["slayer"]["experience"] + 50000},
+            },
+            {"experience": GOAL_PROGRESS_BASELINE["overall"]["experience"] + 120000},
+        )
+        summary = build_current_week_summary(
+            {
+                "_meta": {
+                    "currentWeek": {
+                        "jhusebachz": {
+                            "weekStartDateKey": "2026-05-11",
+                            "baselineOverallXp": GOAL_PROGRESS_BASELINE["overall"]["experience"],
+                            "baselineSkillXp": {
+                                "hunter": GOAL_PROGRESS_BASELINE["hunter"]["experience"],
+                                "slayer": GOAL_PROGRESS_BASELINE["slayer"]["experience"],
+                            },
+                        }
+                    }
+                }
+            },
+            "jhusebachz",
+            current_stats,
+            "2026-05-13",
+            {
+                "days": [
+                    {
+                        "dateKey": "2026-05-13",
+                        "label": "May 13",
+                        "totalXp": 50000,
+                        "effectiveHours": 1.1,
+                        "topSkills": [{"skill": "hunter", "xp": 50000}],
+                        "gainsBySkill": {"hunter": 50000},
+                    },
+                    {
+                        "dateKey": "2026-05-12",
+                        "label": "May 12",
+                        "totalXp": 70000,
+                        "effectiveHours": 1.4,
+                        "topSkills": [{"skill": "slayer", "xp": 50000}],
+                        "gainsBySkill": {"hunter": 20000, "slayer": 50000},
+                    },
+                ]
+            },
+        )
+
+        self.assertEqual(summary["weekStartDateKey"], "2026-05-11")
+        self.assertEqual(summary["baselineOverallXp"], GOAL_PROGRESS_BASELINE["overall"]["experience"])
+        self.assertEqual(summary["totalXp"], 120000)
+        self.assertAlmostEqual(summary["totalEffectiveHours"], 2.5)
+        self.assertEqual(summary["activeDays"], 2)
+        self.assertEqual(summary["daysTracked"], 2)
+        self.assertEqual(summary["topSkills"][0]["skill"], "hunter")
+        self.assertEqual(summary["topSkills"][0]["xp"], 70000)
+
+    def test_snapshot_metadata_includes_generated_timestamp_for_app_sync(self):
+        metadata = build_snapshot_metadata(
+            "jhusebachz",
+            {"totalHours": 1.4, "bySkill": {"hunter": 1.4}, "skippedSkills": []},
+            {"daysTracked": 0, "activeDays": 0, "totalXp": 0, "totalEffectiveHours": 0, "days": []},
+            {"byPlayer": {"jhusebachz": {"totalXp": 98000, "topSkills": []}}},
+            {"weekStartDateKey": "2026-05-12", "totalXp": 98000, "totalEffectiveHours": 1.4},
+            "2026-05-17",
+        )
+
+        self.assertRegex(metadata["generatedAt"], r"^\d{4}-\d{2}-\d{2}T")
+        self.assertEqual(metadata["reportDateKey"], "2026-05-17")
+        self.assertEqual(metadata["timeZone"], "America/New_York")
+
+    def test_goal_two_html_uses_levels_still_needed_and_goal_three_has_clean_separators(self):
+        stats = build_stats(
+            {
+                "hunter": {"experience": GOAL_PROGRESS_BASELINE["hunter"]["experience"] + 98000},
+                "slayer": {"experience": GOAL_PROGRESS_BASELINE["slayer"]["experience"] + 24000},
+            },
+            {"experience": GOAL_PROGRESS_BASELINE["overall"]["experience"] + 122000},
+        )
+        html = build_html_email(
+            {"hunter": 98000, "slayer": 24000, "overall": 122000},
+            stats,
+            {},
+            {},
+            {"totalHours": 2.0, "bySkill": {"hunter": 1.4, "slayer": 0.6}, "skippedSkills": []},
+            {
+                "daysTracked": 1,
+                "activeDays": 1,
+                "totalXp": 122000,
+                "totalEffectiveHours": 2.0,
+                "averageXp": 122000,
+                "averageEffectiveHours": 2.0,
+                "days": [
+                    {
+                        "dateKey": "2026-05-17",
+                        "label": "May 17",
+                        "totalXp": 122000,
+                        "effectiveHours": 2.0,
+                        "topSkills": [{"skill": "hunter", "xp": 98000}],
+                    }
+                ],
+            },
+            {
+                "weekStartDateKey": "2026-05-12",
+                "baselineDateKey": "2026-05-12",
+                "baselineOverallXp": GOAL_PROGRESS_BASELINE["overall"]["experience"],
+                "baselineSkillXp": {"hunter": GOAL_PROGRESS_BASELINE["hunter"]["experience"]},
+                "totalXp": 122000,
+                "totalEffectiveHours": 2.0,
+                "activeDays": 1,
+                "daysTracked": 1,
+                "topSkills": [{"skill": "hunter", "xp": 98000}],
+            },
+        )
+
+        self.assertIn("Levels still needed", html)
+        self.assertNotIn("full levels/day", html)
+        self.assertNotIn("Â·", html)
 
     def test_daily_workflow_runs_four_hours_earlier(self):
         workflow = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "daily.yml"
