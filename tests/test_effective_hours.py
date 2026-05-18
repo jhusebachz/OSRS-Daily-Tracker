@@ -5,6 +5,7 @@ from main import (
     build_effective_hours_summary,
     build_last_seven_days_summary,
     build_plain_text,
+    effective_levels_remaining,
 )
 
 
@@ -102,6 +103,14 @@ class EffectiveHoursTests(unittest.TestCase):
         content = workflow.read_text(encoding="utf-8")
 
         self.assertIn('cron: "30 8 * * *"', content)
+
+    def test_effective_levels_remaining_counts_partial_progress(self):
+        stats = {
+            "overall": {"level": 2249, "experience": 0},
+            "runecraft": {"level": 85, "experience": 3585248},
+        }
+
+        self.assertLess(effective_levels_remaining(stats, 2250), 1.0)
 
 
 if __name__ == "__main__":

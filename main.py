@@ -425,6 +425,35 @@ def clamp_pct(value: float) -> float:
     return max(0.0, min(100.0, value))
 
 
+def partial_level_progress(level: int, experience: int) -> float:
+    if level >= MAX_SKILL_LEVEL:
+        return 0.0
+
+    current_level_xp = level_to_xp(max(level, 1))
+    next_level_xp = level_to_xp(max(level + 1, 2))
+    span = max(next_level_xp - current_level_xp, 1)
+    progressed_xp = max(experience - current_level_xp, 0)
+
+    return max(0.0, min(1.0, progressed_xp / span))
+
+
+def effective_total_level(stats: dict) -> float:
+    total_level = stats["overall"]["level"] if "overall" in stats else sum(
+        stats[skill]["level"] for skill in SKILLS if skill in stats
+    )
+    partial_progress = sum(
+        partial_level_progress(stats[skill]["level"], stats[skill]["experience"])
+        for skill in SKILLS
+        if skill in stats
+    )
+
+    return total_level + partial_progress
+
+
+def effective_levels_remaining(stats: dict, target_total_level: int) -> float:
+    return max(target_total_level - effective_total_level(stats), 0.0)
+
+
 def pace_pct(target_date: date) -> float:
     total_days = max((target_date - GOAL_PROGRESS_START).days, 1)
     elapsed_days = (date.today() - GOAL_PROGRESS_START).days
@@ -698,19 +727,21 @@ def total_level_html(stats: dict, gains: dict) -> str:
         stats[skill]["level"] for skill in SKILLS if skill in stats
     )
     levels_needed = max(GOAL_RUNEFEST_LEVEL - total_level, 0)
+    effective_levels_left = effective_levels_remaining(stats, GOAL_RUNEFEST_LEVEL)
     percent = round(min(total_level / GOAL_RUNEFEST_LEVEL * 100, 100), 1)
     progress_pct = goal_progress_pct(stats, "runefest")
     required_pace_pct = pace_pct(GOAL_RUNEFEST_DATE)
 
     estimated_hours, _, manual_skills = build_runefest_projection(stats, levels_needed)
     hours_per_day = estimated_hours / days_left if levels_needed > 0 else 0
+    effective_levels_per_day = effective_levels_left / days_left if effective_levels_left > 0 else 0
     pace_status = classify_goal(hours_per_day if levels_needed > 0 else 0, manual_skills)
 
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
   {row("Deadline", f"{GOAL_RUNEFEST_DATE} - RuneFest ({days_left} days left)")}
   {row("Current total level", f"{total_level:,} / {GOAL_RUNEFEST_LEVEL:,}")}
-  {row("Levels still needed", str(levels_needed))}
+  {row("Levels still needed", f"{effective_levels_left:.2f} effective")}
   {row("Estimated grind", f"{estimated_hours:.1f} hours" if levels_needed > 0 else "Complete")}
   {row("Required pace", f"{hours_per_day:.2f} h/day" if levels_needed > 0 else "Complete")}
   {row("Pace check", pace_status)}
@@ -720,7 +751,11 @@ def total_level_html(stats: dict, gains: dict) -> str:
         content += '<div style="font-size:14px; color:#16a34a; font-weight:700;">RuneFest goal achieved.</div>'
     else:
         levels_per_day = round(levels_needed / days_left, 2)
-        content += f'<div style="font-size:12px; color:#6b7280; margin-top:4px;">Need <b>{levels_per_day}</b> levels/day to hit {GOAL_RUNEFEST_LEVEL} in time</div>'
+        content += (
+            f'<div style="font-size:12px; color:#6b7280; margin-top:4px;">'
+            f'Need <b>{effective_levels_per_day:.2f}</b> effective levels/day to hit {GOAL_RUNEFEST_LEVEL} in time'
+            f' ({levels_per_day:.2f} full levels/day).</div>'
+        )
 
 
     active = [(skill, gains.get(skill, 0)) for skill in SKILLS if skill in stats and gains.get(skill, 0) > 0]
@@ -851,6 +886,7 @@ def coaching_html(your_stats: dict) -> str:
     total_level = your_stats["overall"]["level"] if "overall" in your_stats else 0
     levels_needed = max(GOAL_RUNEFEST_LEVEL - total_level, 0)
     runefest_total, _, runefest_manual = build_runefest_projection(your_stats, levels_needed)
+    runefest_effective_levels_left = effective_levels_remaining(your_stats, GOAL_RUNEFEST_LEVEL)
 
     goal_one_days = days_until(GOAL_ONE_DATE)
     runefest_days = days_until(GOAL_RUNEFEST_DATE)
@@ -861,6 +897,7 @@ def coaching_html(your_stats: dict) -> str:
 
     goal_one_rate = goal_one_total / goal_one_days if goal_one_days > 0 else None
     runefest_rate = runefest_total / runefest_days if runefest_days > 0 else None
+    runefest_effective_levels_rate = runefest_effective_levels_left / runefest_days if runefest_days > 0 else 0
     max_rate = max_total / max_days if max_days > 0 else None
 
     content = "".join(
@@ -872,7 +909,7 @@ def coaching_html(your_stats: dict) -> str:
             f'</p>',
             f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
             f'RuneFest 2250 <b>{describe_goal_status(classify_goal(runefest_rate, runefest_manual))}</b> at '
-            f'<b>{runefest_rate:.2f} hours/day</b> and <b>{(levels_needed / runefest_days if runefest_days > 0 else 0):.2f} levels/day</b>.'
+            f'<b>{runefest_rate:.2f} hours/day</b> and <b>{runefest_effective_levels_rate:.2f} effective levels/day</b>.'
 
             f'</p>',
             f'<p style="margin: 0 0 10px 0; font-size: 14px; color: #374151; line-height: 1.6;">'
