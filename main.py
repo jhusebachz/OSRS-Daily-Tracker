@@ -233,16 +233,57 @@ def build_player_daily_summary(gains_by_skill: dict[str, int], stats: dict) -> d
     ]
 
     return {
+        "gainsBySkill": {
+            skill: xp
+            for skill, xp in gains_by_skill.items()
+            if skill in SKILLS and xp > 0
+        },
         "totalXp": total_xp,
         "topSkills": top_skills,
     }
 
 
+def merge_gains_by_skill(existing_gains: dict | None, next_gains: dict[str, int]) -> dict[str, int]:
+    merged: dict[str, int] = {}
+
+    if isinstance(existing_gains, dict):
+        for skill, xp in existing_gains.items():
+            if isinstance(skill, str) and isinstance(xp, (int, float)) and xp > 0:
+                merged[skill] = int(xp)
+
+    for skill, xp in next_gains.items():
+        if skill in SKILLS and xp > 0:
+            merged[skill] = merged.get(skill, 0) + int(xp)
+
+    return merged
+
+
+def merge_player_daily_summary(existing_summary: dict | None, gains_by_skill: dict[str, int], stats: dict) -> dict:
+    merged_gains = merge_gains_by_skill(
+        existing_summary.get("gainsBySkill") if isinstance(existing_summary, dict) else None,
+        gains_by_skill,
+    )
+    return build_player_daily_summary(merged_gains, stats)
+
+
 def build_daily_summary(
-    username: str, your_gains: dict[str, int], your_stats: dict, friends_data: dict, previous_all: dict
+    username: str,
+    your_gains: dict[str, int],
+    your_stats: dict,
+    friends_data: dict,
+    previous_all: dict,
+    report_date_key: str,
 ) -> dict:
+    previous_metadata = previous_all.get(METADATA_KEY, {})
+    same_report_day = previous_metadata.get("reportDateKey") == report_date_key
+    previous_by_player = previous_metadata.get("dailySummary", {}).get("byPlayer", {}) if same_report_day else {}
+
     by_player = {
-        username: build_player_daily_summary(your_gains, your_stats),
+        username: merge_player_daily_summary(
+            previous_by_player.get(username) if isinstance(previous_by_player, dict) else None,
+            your_gains,
+            your_stats,
+        ),
     }
     your_total_xp = by_player[username]["totalXp"]
 
@@ -251,7 +292,11 @@ def build_daily_summary(
             continue
 
         friend_gains = calculate_gains(previous_all, friend, friends_data[friend])
-        friend_summary = build_player_daily_summary(friend_gains, friends_data[friend])
+        friend_summary = merge_player_daily_summary(
+            previous_by_player.get(friend) if isinstance(previous_by_player, dict) else None,
+            friend_gains,
+            friends_data[friend],
+        )
         friend_summary["diff"] = your_total_xp - friend_summary["totalXp"]
         by_player[friend] = friend_summary
 
@@ -357,6 +402,28 @@ def build_last_seven_days_entry(report_date: str, gains: dict[str, int], effecti
     }
 
 
+def merge_last_seven_days_entry(existing_entry: dict | None, report_date: str, gains: dict[str, int], effective_hours_summary: dict) -> dict:
+    next_entry = build_last_seven_days_entry(report_date, gains, effective_hours_summary)
+
+    if not isinstance(existing_entry, dict):
+        return next_entry
+
+    merged_gains = merge_gains_by_skill(existing_entry.get("gainsBySkill"), next_entry.get("gainsBySkill", {}))
+    merged_effective_hours = round(
+        max(float(existing_entry.get("effectiveHours", 0)), 0.0) + next_entry["effectiveHours"],
+        4,
+    )
+
+    return {
+        "dateKey": report_date,
+        "label": format_last_seven_days_label(report_date),
+        "totalXp": sum(merged_gains.values()),
+        "effectiveHours": merged_effective_hours,
+        "topSkills": build_top_skill_entries(merged_gains),
+        "gainsBySkill": merged_gains,
+    }
+
+
 def summarize_last_seven_days(entries: list[dict]) -> dict:
     sorted_entries = sorted(entries, key=lambda item: item["dateKey"], reverse=True)[:7]
     days_tracked = len(sorted_entries)
@@ -389,13 +456,21 @@ def build_last_seven_days_summary(
         .get(username, {})
         .get("days", [])
     )
+    existing_today_entry = next(
+        (
+            normalized
+            for normalized in (normalize_last_seven_days_entry(entry) for entry in previous_entries)
+            if normalized is not None and normalized["dateKey"] == report_date_key
+        ),
+        None,
+    )
     normalized_previous = [
         normalized
         for normalized in (normalize_last_seven_days_entry(entry) for entry in previous_entries)
         if normalized is not None and normalized["dateKey"] != report_date_key
     ]
     merged_entries = [
-        build_last_seven_days_entry(report_date_key, gains, effective_hours_summary),
+        merge_last_seven_days_entry(existing_today_entry, report_date_key, gains, effective_hours_summary),
         *normalized_previous,
     ]
     return summarize_last_seven_days(merged_entries)
@@ -1328,7 +1403,7 @@ def main() -> None:
         effective_hours_summary,
         report_date_key,
     )
-    daily_summary = build_daily_summary(USERNAME, your_gains, your_stats, friends_data, previous_all)
+    daily_summary = build_daily_summary(USERNAME, your_gains, your_stats, friends_data, previous_all, report_date_key)
     current_week_summary = build_current_week_summary(
         previous_all,
         USERNAME,

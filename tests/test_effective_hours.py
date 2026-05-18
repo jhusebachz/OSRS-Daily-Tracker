@@ -5,6 +5,7 @@ from main import (
     GOAL_PROGRESS_BASELINE,
     SKILLS,
     build_current_week_summary,
+    build_daily_summary,
     build_effective_hours_summary,
     build_html_email,
     build_last_seven_days_summary,
@@ -90,6 +91,72 @@ class EffectiveHoursTests(unittest.TestCase):
         self.assertEqual(summary["days"][0]["dateKey"], "2026-05-16")
         self.assertEqual(summary["totalXp"], 250000)
         self.assertAlmostEqual(summary["totalEffectiveHours"], 3.3)
+
+    def test_last_seven_days_summary_accumulates_same_day_manual_reruns(self):
+        summary = build_last_seven_days_summary(
+            {
+                "_meta": {
+                    "lastSevenDays": {
+                        "jhusebachz": {
+                            "days": [
+                                {
+                                    "dateKey": "2026-05-16",
+                                    "label": "May 16",
+                                    "totalXp": 100000,
+                                    "effectiveHours": 1.4,
+                                    "topSkills": [{"skill": "hunter", "xp": 100000}],
+                                    "gainsBySkill": {"hunter": 100000},
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "jhusebachz",
+            {"overall": 50000, "hunter": 30000, "slayer": 20000},
+            {"totalHours": 0.9, "bySkill": {"hunter": 0.5, "slayer": 0.4}, "skippedSkills": []},
+            "2026-05-16",
+        )
+
+        self.assertEqual(summary["daysTracked"], 1)
+        self.assertEqual(summary["days"][0]["totalXp"], 150000)
+        self.assertAlmostEqual(summary["days"][0]["effectiveHours"], 2.3)
+        self.assertEqual(summary["days"][0]["gainsBySkill"]["hunter"], 130000)
+        self.assertEqual(summary["days"][0]["gainsBySkill"]["slayer"], 20000)
+
+    def test_daily_summary_accumulates_same_day_manual_reruns(self):
+        stats = build_stats(
+            {
+                "hunter": {"experience": GOAL_PROGRESS_BASELINE["hunter"]["experience"] + 130000},
+                "slayer": {"experience": GOAL_PROGRESS_BASELINE["slayer"]["experience"] + 20000},
+            },
+            {"experience": GOAL_PROGRESS_BASELINE["overall"]["experience"] + 150000},
+        )
+        summary = build_daily_summary(
+            "jhusebachz",
+            {"overall": 50000, "hunter": 30000, "slayer": 20000},
+            stats,
+            {},
+            {
+                "_meta": {
+                    "reportDateKey": "2026-05-16",
+                    "dailySummary": {
+                        "byPlayer": {
+                            "jhusebachz": {
+                                "totalXp": 100000,
+                                "topSkills": [{"skill": "hunter", "xp": 100000, "level": stats["hunter"]["level"]}],
+                                "gainsBySkill": {"hunter": 100000},
+                            }
+                        }
+                    },
+                }
+            },
+            "2026-05-16",
+        )
+
+        self.assertEqual(summary["byPlayer"]["jhusebachz"]["totalXp"], 150000)
+        self.assertEqual(summary["byPlayer"]["jhusebachz"]["gainsBySkill"]["hunter"], 130000)
+        self.assertEqual(summary["byPlayer"]["jhusebachz"]["gainsBySkill"]["slayer"], 20000)
 
     def test_plain_text_report_includes_effective_hours_line(self):
         report = build_plain_text(
