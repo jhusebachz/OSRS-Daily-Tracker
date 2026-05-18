@@ -62,6 +62,26 @@ class EffectiveHoursTests(unittest.TestCase):
         self.assertEqual(summary["totalHours"], 1.0)
         self.assertEqual(summary["skippedSkills"], ["unknownskill"])
 
+    def test_effective_hours_avoids_double_counting_combat_overlap_when_slayer_is_present(self):
+        summary = build_effective_hours_summary(
+            {
+                "defence": 41221,
+                "hitpoints": 54879,
+                "magic": 54880,
+                "herblore": 178,
+                "slayer": 42330,
+            }
+        )
+
+        self.assertAlmostEqual(summary["totalHours"], 1.0591)
+        self.assertEqual(
+            summary["bySkill"],
+            {
+                "slayer": 1.0582,
+                "herblore": 0.0009,
+            },
+        )
+
     def test_last_seven_days_summary_rolls_forward_with_today_entry(self):
         summary = build_last_seven_days_summary(
             {
