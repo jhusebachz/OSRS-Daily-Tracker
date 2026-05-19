@@ -799,6 +799,42 @@ def build_runefest_projection(stats: dict, levels_needed: int) -> tuple[float, i
     return total_hours, total_xp, sorted(manual_skills)
 
 
+def build_runefest_recommendations(
+    stats: dict, limit: int = 3
+) -> list[tuple[str, int, int, float, int]]:
+    recommendations: list[tuple[str, int, int, float, int]] = []
+
+    for skill in SKILLS:
+        if skill not in stats:
+            continue
+
+        plan = GOAL_TRAINING_PLANS.get(skill)
+        if not plan or plan["xp_per_hour"] <= 0 or is_slayer_tracked_skill(skill):
+            continue
+
+        current_level = stats[skill]["level"]
+        if current_level >= MAX_SKILL_LEVEL:
+            continue
+
+        target_level = current_level + 1
+        remaining_xp = max(level_to_xp(target_level) - stats[skill]["experience"], 0)
+        if remaining_xp <= 0:
+            continue
+
+        recommendations.append(
+            (
+                skill,
+                current_level,
+                target_level,
+                remaining_xp / plan["xp_per_hour"],
+                remaining_xp,
+            )
+        )
+
+    recommendations.sort(key=lambda item: item[3])
+    return recommendations[:limit]
+
+
 def section(title: str, content_html: str) -> str:
     return f"""
 <div style="margin: 24px 0; background: #ffffff; border-radius: 10px;
@@ -947,7 +983,13 @@ def goal_one_html(stats: dict, gains: dict) -> str:
         hours_left, rate_text = projected_hours(skill, remaining_xp)
         remaining.append((skill, stats[skill]["level"], target_level, percent, remaining_xp, hours_left, rate_text))
 
-    remaining.sort(key=lambda item: item[3], reverse=True)
+    remaining.sort(
+        key=lambda item: (
+            item[5] is None,
+            -(item[5] or 0),
+            -item[4],
+        )
+    )
     estimated_hours = sum(item[5] for item in remaining if item[5] is not None)
     manual_skills = [
         format_skill_name(item[0]) for item in remaining if item[5] is None and not is_slayer_tracked_skill(item[0])
@@ -1016,6 +1058,7 @@ def total_level_html(stats: dict, gains: dict) -> str:
     hours_per_day = estimated_hours / days_left if levels_needed > 0 else 0
     effective_levels_per_day = effective_levels_left / days_left if effective_levels_left > 0 else 0
     pace_status = classify_goal(hours_per_day if levels_needed > 0 else 0, manual_skills)
+    recommendations = build_runefest_recommendations(stats)
 
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
@@ -1037,15 +1080,12 @@ def total_level_html(stats: dict, gains: dict) -> str:
         )
 
 
-    active = [(skill, gains.get(skill, 0)) for skill in SKILLS if skill in stats and gains.get(skill, 0) > 0]
-    active.sort(key=lambda item: item[1], reverse=True)
-
-    if active:
-        content += '<div style="margin-top:10px; font-size:12px; font-weight:700; color:#374151; text-transform:uppercase; letter-spacing:.04em;">Most active today</div>'
-        for skill, xp in active[:5]:
+    if recommendations:
+        content += '<div style="margin-top:10px; font-size:12px; font-weight:700; color:#374151; text-transform:uppercase; letter-spacing:.04em;">Fastest next levels</div>'
+        for skill, level, target_level, hours_left, _remaining_xp in recommendations:
             content += (
                 f'<div style="font-size:12px; color:#374151; padding:2px 0;">'
-                f'&bull; {format_skill_name(skill)}: +{xp:,} xp (Lv{stats[skill]["level"]})</div>'
+                f'&bull; {format_skill_name(skill)} Lv{level} to {target_level}: {hours_left:.1f}h</div>'
             )
 
     content += progress_bar(progress_pct, "#3b82f6", required_pace_pct)
@@ -1068,6 +1108,9 @@ def max_progress_html(stats: dict, gains: dict) -> str:
 
     for skill in SKILLS:
         if skill not in stats:
+            continue
+
+        if is_slayer_tracked_skill(skill):
             continue
 
         if stats[skill]["level"] >= MAX_SKILL_LEVEL:
@@ -1280,15 +1323,11 @@ def build_html_email(
   <div style="font-size: 26px; font-weight: 800; margin-bottom: 4px;">{today}</div>
   <div style="font-size: 28px; font-weight: 800; margin-top: 16px;">{your_total_xp:,} <span style="font-size:14px; font-weight:400; opacity:0.8;">XP gained today</span></div>
   <div style="margin-top: 12px; font-size: 14px; color: rgba(255,255,255,0.92);">
-    Effective hours played today: <b>{effective_hours_summary.get("totalHours", 0):.1f} hours</b>
+    Effective hours played since last report: <b>{effective_hours_summary.get("totalHours", 0):.1f} hours</b>
   </div>
   <div style="margin-top: 8px; font-size: 13px; color: rgba(255,255,255,0.78);">
     Last 7 days: <b>{last_seven_days_summary.get("totalXp", 0):,} xp</b> over
     <b>{last_seven_days_summary.get("totalEffectiveHours", 0):.1f} hours</b>
-  </div>
-  <div style="margin-top: 6px; font-size: 13px; color: rgba(255,255,255,0.78);">
-    This week: <b>{current_week_summary.get("totalXp", 0):,} xp</b> over
-    <b>{current_week_summary.get("totalEffectiveHours", 0):.1f} hours</b>
   </div>
   {f'<div style="margin-top: 10px;">{top_effective_hours_html}</div>' if top_effective_hours_html else ''}
   <div style="margin-top: 14px;">{top_gains_html.replace('color:#374151', 'color:rgba(255,255,255,0.85)').replace('color:#9ca3af', 'color:rgba(255,255,255,0.5)')}</div>
@@ -1347,8 +1386,7 @@ def build_plain_text(
     lines = [
         f"OSRS Daily Report - {get_report_date_key()}",
         f"Total XP Today: {your_total_xp:,}",
-        f"Effective hours played today: {effective_hours_summary.get('totalHours', 0):.1f} hours",
-        f"This week: {current_week_summary.get('totalXp', 0):,} xp | {current_week_summary.get('totalEffectiveHours', 0):.1f} hours | {current_week_summary.get('activeDays', 0)} active days",
+        f"Effective hours played since last report: {effective_hours_summary.get('totalHours', 0):.1f} hours",
         f"Last 7 days: {last_seven_days_summary.get('totalXp', 0):,} xp | {last_seven_days_summary.get('totalEffectiveHours', 0):.1f} hours | {last_seven_days_summary.get('activeDays', 0)} active days",
         "",
     ]

@@ -221,8 +221,8 @@ class EffectiveHoursTests(unittest.TestCase):
             },
         )
 
-        self.assertIn("Effective hours played today: 1.4 hours", report)
-        self.assertIn("This week: 98,000 xp | 1.4 hours | 1 active days", report)
+        self.assertIn("Effective hours played since last report: 1.4 hours", report)
+        self.assertNotIn("This week:", report)
         self.assertIn("Last 7 days: 98,000 xp | 1.4 hours | 1 active days", report)
         self.assertIn("Last 7 day breakdown:", report)
 
@@ -342,8 +342,13 @@ class EffectiveHoursTests(unittest.TestCase):
         )
 
         self.assertIn("Levels still needed", html)
+        self.assertIn("Fastest next levels", html)
+        self.assertIn("Effective hours played since last report", html)
+        self.assertNotIn("This week:", html)
         self.assertNotIn("full levels/day", html)
         self.assertNotIn("Â·", html)
+        closest_to_99 = html.split("Closest to 99", 1)[1]
+        self.assertNotIn("Attack", closest_to_99)
 
     def test_daily_workflow_runs_four_hours_earlier(self):
         workflow = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "daily.yml"
