@@ -63,7 +63,7 @@ class EffectiveHoursTests(unittest.TestCase):
         self.assertEqual(summary["totalHours"], 1.0)
         self.assertEqual(summary["skippedSkills"], ["unknownskill"])
 
-    def test_effective_hours_avoids_double_counting_combat_overlap_when_slayer_is_present(self):
+    def test_effective_hours_ignores_combat_skills_for_efficient_hour_totals(self):
         summary = build_effective_hours_summary(
             {
                 "defence": 41221,
@@ -80,6 +80,24 @@ class EffectiveHoursTests(unittest.TestCase):
             {
                 "slayer": 1.0582,
                 "herblore": 0.0009,
+            },
+        )
+
+    def test_effective_hours_ignores_combat_gains_even_without_slayer_xp(self):
+        summary = build_effective_hours_summary(
+            {
+                "attack": 24000,
+                "ranged": 42000,
+                "hitpoints": 13000,
+                "hunter": 70000,
+            }
+        )
+
+        self.assertEqual(summary["totalHours"], 1.0)
+        self.assertEqual(
+            summary["bySkill"],
+            {
+                "hunter": 1.0,
             },
         )
 

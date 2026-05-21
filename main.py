@@ -124,8 +124,14 @@ EFFECTIVE_XP_PER_HOUR_BY_SKILL = {
     "farming": 120000,
     "sailing": 60000,
 }
-ALWAYS_PASSIVE_EFFECTIVE_HOUR_SKILLS = {"hitpoints"}
-SLAYER_OVERLAP_EFFECTIVE_HOUR_SKILLS = {"attack", "strength", "defence", "ranged", "magic"}
+INEFFICIENT_COMBAT_EFFECTIVE_HOUR_SKILLS = {
+    "attack",
+    "strength",
+    "defence",
+    "hitpoints",
+    "ranged",
+    "magic",
+}
 GOAL_PROGRESS_BASELINE = {
     "overall": {"level": 2203, "experience": 173773255},
     "attack": {"level": 91, "experience": 6122415},
@@ -185,16 +191,12 @@ def build_effective_hours_summary(
     rates = xp_per_hour_by_skill or EFFECTIVE_XP_PER_HOUR_BY_SKILL
     by_skill: dict[str, float] = {}
     skipped_skills: list[str] = []
-    slayer_gained = gains_by_skill.get("slayer", 0) > 0
 
     for skill, xp_gained in gains_by_skill.items():
         if skill == "overall" or xp_gained <= 0:
             continue
 
-        if skill in ALWAYS_PASSIVE_EFFECTIVE_HOUR_SKILLS:
-            continue
-
-        if slayer_gained and skill in SLAYER_OVERLAP_EFFECTIVE_HOUR_SKILLS:
+        if skill in INEFFICIENT_COMBAT_EFFECTIVE_HOUR_SKILLS:
             continue
 
         xp_per_hour = rates.get(skill)
