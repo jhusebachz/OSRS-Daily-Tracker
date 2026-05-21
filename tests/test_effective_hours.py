@@ -4,6 +4,7 @@ from pathlib import Path
 from main import (
     GOAL_PROGRESS_BASELINE,
     SKILLS,
+    build_last_seven_days_top_skills,
     build_current_week_summary,
     build_daily_summary,
     build_effective_hours_summary,
@@ -224,7 +225,8 @@ class EffectiveHoursTests(unittest.TestCase):
         self.assertIn("Effective hours played since last report: 1.4 hours", report)
         self.assertNotIn("This week:", report)
         self.assertIn("Last 7 days: 98,000 xp | 1.4 hours | 1 active days", report)
-        self.assertIn("Last 7 day breakdown:", report)
+        self.assertIn("Last 7 day top skills:", report)
+        self.assertNotIn("Last 7 day breakdown:", report)
 
     def test_current_week_summary_uses_week_baseline_instead_of_latest_delta(self):
         current_stats = build_stats(
@@ -347,8 +349,88 @@ class EffectiveHoursTests(unittest.TestCase):
         self.assertNotIn("This week:", html)
         self.assertNotIn("full levels/day", html)
         self.assertNotIn("Â·", html)
+        self.assertIn("Top skills", html)
         closest_to_99 = html.split("Closest to 99", 1)[1]
         self.assertNotIn("Attack", closest_to_99)
+
+    def test_goal_one_and_goal_three_follow_app_ordering(self):
+        stats = build_stats(
+            {
+                "hunter": {
+                    "level": 91,
+                    "experience": GOAL_PROGRESS_BASELINE["hunter"]["experience"] + 180000,
+                },
+                "agility": {
+                    "level": 98,
+                    "experience": 12950000,
+                },
+                "runecraft": {
+                    "level": 86,
+                    "experience": GOAL_PROGRESS_BASELINE["runecraft"]["experience"],
+                },
+            },
+            {"experience": GOAL_PROGRESS_BASELINE["overall"]["experience"] + 180000},
+        )
+        html = build_html_email(
+            {"hunter": 180000, "overall": 180000},
+            stats,
+            {},
+            {},
+            {"totalHours": 2.6, "bySkill": {"hunter": 2.6}, "skippedSkills": []},
+            {
+                "daysTracked": 1,
+                "activeDays": 1,
+                "totalXp": 180000,
+                "totalEffectiveHours": 2.6,
+                "averageXp": 180000,
+                "averageEffectiveHours": 2.6,
+                "days": [],
+            },
+            {
+                "weekStartDateKey": "2026-05-19",
+                "baselineDateKey": "2026-05-19",
+                "baselineOverallXp": GOAL_PROGRESS_BASELINE["overall"]["experience"],
+                "baselineSkillXp": {"hunter": GOAL_PROGRESS_BASELINE["hunter"]["experience"]},
+                "totalXp": 180000,
+                "totalEffectiveHours": 2.6,
+                "activeDays": 1,
+                "daysTracked": 1,
+                "topSkills": [{"skill": "hunter", "xp": 180000}],
+            },
+        )
+
+        goal_one_section = html.split("Still needed", 1)[1]
+        self.assertLess(goal_one_section.index("Hunter"), goal_one_section.index("Runecraft"))
+
+        closest_to_99 = html.split("Closest to 99", 1)[1]
+        self.assertLess(closest_to_99.index("Agility"), closest_to_99.index("Runecraft"))
+
+    def test_last_seven_days_top_skills_aggregate_across_the_full_window(self):
+        summary = {
+            "days": [
+                {
+                    "dateKey": "2026-05-17",
+                    "label": "May 17",
+                    "totalXp": 200000,
+                    "effectiveHours": 2.0,
+                    "topSkills": [{"skill": "hunter", "xp": 140000}],
+                    "gainsBySkill": {"hunter": 140000, "slayer": 60000},
+                },
+                {
+                    "dateKey": "2026-05-16",
+                    "label": "May 16",
+                    "totalXp": 180000,
+                    "effectiveHours": 1.8,
+                    "topSkills": [{"skill": "runecraft", "xp": 90000}],
+                    "gainsBySkill": {"hunter": 40000, "runecraft": 90000, "slayer": 50000},
+                },
+            ]
+        }
+
+        self.assertEqual(
+            build_last_seven_days_top_skills(summary),
+            [("hunter", 180000), ("slayer", 110000), ("runecraft", 90000)],
+        )
 
     def test_daily_workflow_runs_four_hours_earlier(self):
         workflow = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "daily.yml"

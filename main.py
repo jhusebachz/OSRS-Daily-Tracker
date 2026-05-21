@@ -451,6 +451,29 @@ def summarize_last_seven_days(entries: list[dict]) -> dict:
     }
 
 
+def build_last_seven_days_top_skills(last_seven_days_summary: dict, limit: int = 3) -> list[tuple[str, int]]:
+    totals: dict[str, int] = {}
+
+    for day in last_seven_days_summary.get("days", []):
+        gains_by_skill = day.get("gainsBySkill", {})
+        if isinstance(gains_by_skill, dict) and gains_by_skill:
+            for skill, xp in gains_by_skill.items():
+                if isinstance(skill, str) and isinstance(xp, (int, float)) and xp > 0:
+                    totals[skill] = totals.get(skill, 0) + int(xp)
+            continue
+
+        for item in day.get("topSkills", []):
+            if (
+                isinstance(item, dict)
+                and isinstance(item.get("skill"), str)
+                and isinstance(item.get("xp"), (int, float))
+                and item["xp"] > 0
+            ):
+                totals[item["skill"]] = totals.get(item["skill"], 0) + int(item["xp"])
+
+    return sorted(totals.items(), key=lambda item: item[1], reverse=True)[:limit]
+
+
 def build_last_seven_days_summary(
     previous_all: dict,
     username: str,
@@ -986,8 +1009,8 @@ def goal_one_html(stats: dict, gains: dict) -> str:
     remaining.sort(
         key=lambda item: (
             item[5] is None,
-            -(item[5] or 0),
-            -item[4],
+            item[5] or 0,
+            item[4],
         )
     )
     estimated_hours = sum(item[5] for item in remaining if item[5] is not None)
@@ -1121,7 +1144,13 @@ def max_progress_html(stats: dict, gains: dict) -> str:
         hours_left, rate_text = projected_hours(skill, remaining_xp)
         remaining.append((skill, stats[skill]["level"], remaining_xp, hours_left, rate_text))
 
-    remaining.sort(key=lambda item: item[2])
+    remaining.sort(
+        key=lambda item: (
+            item[3] is None,
+            item[3] or 0,
+            item[2],
+        )
+    )
     percent = round(len(maxed) / len(SKILLS) * 100, 1)
     estimated_hours = sum(item[3] for item in remaining if item[3] is not None)
     manual_skills = [
@@ -1253,6 +1282,7 @@ def last_seven_days_html(last_seven_days_summary: dict) -> str:
             '<p style="margin:0; font-size:13px; color:#6b7280;">No seven-day history is available yet.</p>',
         )
 
+    top_skills = build_last_seven_days_top_skills(last_seven_days_summary)
     content = f"""
 <table width="100%" cellpadding="0" cellspacing="0">
   {row("Total progress", f"{last_seven_days_summary.get('totalXp', 0):,} xp")}
@@ -1261,19 +1291,13 @@ def last_seven_days_html(last_seven_days_summary: dict) -> str:
   {row("Average per tracked day", f"{round(last_seven_days_summary.get('averageXp', 0)):,} xp · {last_seven_days_summary.get('averageEffectiveHours', 0):.1f}h")}
 </table>"""
 
-    for day in days:
-        top_skills = day.get("topSkills", [])
-        top_skills_html = " · ".join(
-            f"{format_skill_name(item['skill'])} {item['xp']:,} xp"
-            for item in top_skills
-            if isinstance(item, dict) and item.get("xp", 0) > 0
-        )
-        content += f"""
-<div style="margin-top:10px; border-radius:12px; border:1px solid #e5e7eb; background:#f9fafb; padding:12px;">
-  <div style="font-size:13px; font-weight:700; color:#111827; margin-bottom:4px;">{day['label']}</div>
-  <div style="font-size:12px; color:#6b7280;">{day['totalXp']:,} xp · {day['effectiveHours']:.1f}h</div>
-  {f'<div style="font-size:12px; color:#6b7280; margin-top:4px;">Top skills: {top_skills_html}</div>' if top_skills_html else ''}
-</div>"""
+    if top_skills:
+        content += '<div style="margin-top:10px; font-size:12px; color:#6b7280;">Top skills</div>'
+        for skill, xp in top_skills:
+            content += (
+                f'<div style="font-size:12px; color:#374151; padding:2px 0;">'
+                f'&bull; {format_skill_name(skill)} {xp:,} xp</div>'
+            )
 
     return section("Last 7 Days", content)
 
@@ -1401,11 +1425,13 @@ def build_plain_text(
         lines.append("")
 
     if last_seven_days_summary.get("days"):
-        lines.append("Last 7 day breakdown:")
-        lines.extend(
-            f"- {day['label']}: {day['totalXp']:,} xp | {day['effectiveHours']:.1f}h"
-            for day in last_seven_days_summary["days"]
-        )
+        top_skills = build_last_seven_days_top_skills(last_seven_days_summary)
+        if top_skills:
+            lines.append("Last 7 day top skills:")
+            lines.extend(
+                f"- {format_skill_name(skill)}: {xp:,} xp"
+                for skill, xp in top_skills
+            )
         lines.append("")
 
     for friend in FRIENDS:
