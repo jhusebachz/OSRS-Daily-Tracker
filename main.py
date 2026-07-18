@@ -229,6 +229,7 @@ def get_top_effective_hour_contributors(
 
 def build_player_daily_summary(gains_by_skill: dict[str, int], stats: dict) -> dict:
     total_xp = sum(value for skill, value in gains_by_skill.items() if skill in SKILLS)
+    effective_hours_summary = build_effective_hours_summary(gains_by_skill)
     top_skills = [
         {
             "skill": skill,
@@ -244,6 +245,7 @@ def build_player_daily_summary(gains_by_skill: dict[str, int], stats: dict) -> d
     ]
 
     return {
+        "effectiveHours": round(float(effective_hours_summary.get("totalHours", 0)), 4),
         "gainsBySkill": {
             skill: xp
             for skill, xp in gains_by_skill.items()
@@ -943,7 +945,9 @@ def friend_comparison_html(your_gains: dict, friends_data: dict, previous_all: d
             continue
 
         friend_gains = calculate_gains(previous_all, friend, friends_data[friend])
-        friend_total_xp = sum(value for skill, value in friend_gains.items() if skill in SKILLS)
+        friend_summary = build_player_daily_summary(friend_gains, friends_data[friend])
+        friend_total_xp = friend_summary["totalXp"]
+        friend_effective_hours = friend_summary["effectiveHours"]
         diff = your_total_xp - friend_total_xp
 
         if diff > 0:
@@ -976,6 +980,7 @@ def friend_comparison_html(your_gains: dict, friends_data: dict, previous_all: d
     <span style="font-size:12px; font-weight:400; color:#6b7280; margin-left:6px;">{friend_total_xp:,} xp today</span>
     {badge}
   </div>
+  {f'<div style="font-size:12px; color:#6b7280; margin-bottom:4px;">Hours played: {friend_effective_hours:.1f}h</div>' if friend_effective_hours > 0 else ''}
   <div style="font-size:12px; color:#6b7280; margin-bottom:3px;">Top gains:</div>
   {top_three_html}
 </div>"""
@@ -1441,10 +1446,13 @@ def build_plain_text(
             continue
 
         friend_gains = calculate_gains(previous_all, friend, friends_data[friend])
-        friend_xp = sum(value for skill, value in friend_gains.items() if skill in SKILLS)
+        friend_summary = build_player_daily_summary(friend_gains, friends_data[friend])
+        friend_xp = friend_summary["totalXp"]
+        friend_effective_hours = friend_summary["effectiveHours"]
         diff = your_total_xp - friend_xp
         status = f"ahead by {diff:,}" if diff >= 0 else f"trailing by {abs(diff):,}"
-        lines.append(f"{friend}: {friend_xp:,} xp ({status})")
+        hours_suffix = f" | {friend_effective_hours:.1f}h played" if friend_effective_hours > 0 else ""
+        lines.append(f"{friend}: {friend_xp:,} xp ({status}){hours_suffix}")
 
     return "\n".join(lines)
 
@@ -1529,3 +1537,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
