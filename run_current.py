@@ -10,14 +10,14 @@ from datetime import date
 import re
 
 import main as tracker
+import progression_goals
 
 
 # Active friend roster. 3Sixteen is the current name of the account formerly
 # tracked as gwahpy.
 tracker.FRIENDS = ["3Sixteen", "beefmissle13", "kingxdabber", "hedith", "TooClose42"]
 
-# Active goals. The completed Total Level 2250 / RuneFest target is retained in
-# the historical helper code but is no longer rendered as an active goal.
+# Active headline goals.
 tracker.GOAL_ONE_DATE = date(2026, 12, 31)
 tracker.GOAL_MAX_DATE = date(2027, 12, 31)
 
@@ -46,12 +46,12 @@ def goal_one_html_year_end(stats: dict, gains: dict) -> str:
 tracker.goal_one_html = goal_one_html_year_end
 
 
-# Total Level 2250 is complete, so remove the old RuneFest card from active reports.
-def completed_total_level_html(_stats: dict, _gains: dict) -> str:
-    return ""
+# Reuse the completed 2250 goal's old report slot for All 95s + progression milestones.
+def progression_goal_html(stats: dict, _gains: dict) -> str:
+    return progression_goals.build_progression_html(tracker, stats)
 
 
-tracker.total_level_html = completed_total_level_html
+tracker.total_level_html = progression_goal_html
 
 
 _original_max_progress_html = tracker.max_progress_html
@@ -60,7 +60,7 @@ _original_max_progress_html = tracker.max_progress_html
 def max_progress_html_year_end(stats: dict, gains: dict) -> str:
     return (
         _original_max_progress_html(stats, gains)
-        .replace("Goal 3 - Max Cape by 33rd Birthday", "Goal 2 - Max Cape by End of 2027")
+        .replace("Goal 3 - Max Cape by 33rd Birthday", "Goal 3 - Max Cape by End of 2027")
         .replace("33rd birthday", "year-end target")
     )
 
