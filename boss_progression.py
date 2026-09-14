@@ -3,82 +3,111 @@
 from __future__ import annotations
 
 
-# Curated progression order, deliberately favoring approachable first kills before
-# mechanically demanding encounters. There is no official Jagex difficulty order;
-# this is a coaching queue, not a tier-list claim.
+# The OSRS Wiki Bossing Ladder is the backbone for progression. Tier order and,
+# where possible, order within a tier follow the Wiki guide. Encounters not yet
+# placed on the Wiki ladder are inserted conservatively beside comparable bosses.
+# This is intentionally a first-KC learning path, not a profitability tier list.
+BOSS_LADDER_TIERS = {
+    "Easy": [
+        "Brutus",
+        "Wintertodt",
+        "Tempoross",
+        "Barrows Chests",
+        "Obor",
+        "Bryophyta",
+        "Giant Mole",
+        "Deranged Archaeologist",
+        "Scurrius",
+    ],
+    "Medium": [
+        "Amoxliatl",
+        # Newer mid-game encounter; community guidance places it just above Amoxliatl.
+        "Mad Angel",
+        "The Hueycoatl",
+        "Hespori",
+        "Crazy Archaeologist",
+        "Chaos Fanatic",
+        # Jagex describes Shellbane as a mid-level Slayer boss.
+        "Shellbane Gryphon",
+        "Kraken",
+        "Sarachnis",
+        "King Black Dragon",
+        "Zalcano",
+        "Lunar Chests",
+        "Thermonuclear Smoke Devil",
+        "Mimic",
+        "The Royal Titans",
+        # The Wiki puts God Wars bosses in teams at the end of Medium tier.
+        "Commander Zilyana",
+        "General Graardor",
+        "K'ril Tsutsaroth",
+        "Kree'Arra",
+    ],
+    "Hard": [
+        "Scorpia",
+        "Chaos Elemental",
+        "Cal'varion",
+        "Vet'ion",
+        "Spindel",
+        "Venenatis",
+        "Artio",
+        "Callisto",
+        "Dagannoth Rex",
+        "Dagannoth Prime",
+        "Dagannoth Supreme",
+        "Kalphite Queen",
+        "Grotesque Guardians",
+        "Skotizo",
+        "The Gauntlet",
+        "TzTok-Jad",
+    ],
+    "Elite": [
+        "Zulrah",
+        "Vorkath",
+        "Phantom Muspah",
+        "Duke Sucellus",
+        "Abyssal Sire",
+        "Cerberus",
+        "Araxxor",
+        "Alchemical Hydra",
+        "The Corrupted Gauntlet",
+        "The Whisperer",
+        "The Leviathan",
+        "Vardorvis",
+        "Corporeal Beast",
+        "Nex",
+        "Tombs of Amascut",
+    ],
+    "Master": [
+        "Chambers of Xeric",
+        "Nightmare",
+        "Phosani's Nightmare",
+        # Current guides place Maggot King around Phosani-level mechanical difficulty.
+        "Maggot King",
+        "Yama",
+        "Doom of Mokhaiotl",
+        "Theatre of Blood",
+    ],
+    "Grandmaster": [
+        "Chambers of Xeric: Challenge Mode",
+        "Tombs of Amascut: Expert Mode",
+        "Theatre of Blood: Hard Mode",
+        "Sol Heredit",
+        "TzKal-Zuk",
+    ],
+}
+
 BOSS_DIFFICULTY_ORDER = [
-    "Wintertodt",
-    "Tempoross",
-    "Obor",
-    "Bryophyta",
-    "Scurrius",
-    "Brutus",
-    "Giant Mole",
-    "Barrows Chests",
-    "Crazy Archaeologist",
-    "Deranged Archaeologist",
-    "Chaos Fanatic",
-    "Hespori",
-    "King Black Dragon",
-    "Kraken",
-    "Sarachnis",
-    "Scorpia",
-    "Zalcano",
-    "Lunar Chests",
-    "Amoxliatl",
-    "Mad Angel",
-    "Maggot King",
-    "The Hueycoatl",
-    "The Royal Titans",
-    "Grotesque Guardians",
-    "Skotizo",
-    "Mimic",
-    "Cal'varion",
-    "Spindel",
-    "Artio",
-    "Chaos Elemental",
-    "Dagannoth Rex",
-    "Dagannoth Prime",
-    "Dagannoth Supreme",
-    "Commander Zilyana",
-    "General Graardor",
-    "K'ril Tsutsaroth",
-    "Kree'Arra",
-    "Kalphite Queen",
-    "Callisto",
-    "Venenatis",
-    "Vet'ion",
-    "Zulrah",
-    "Vorkath",
-    "Phantom Muspah",
-    "Abyssal Sire",
-    "Cerberus",
-    "Thermonuclear Smoke Devil",
-    "Alchemical Hydra",
-    "Corporeal Beast",
-    "Araxxor",
-    "Shellbane Gryphon",
-    "Duke Sucellus",
-    "Vardorvis",
-    "The Leviathan",
-    "The Whisperer",
-    "The Gauntlet",
-    "The Corrupted Gauntlet",
-    "Nightmare",
-    "Nex",
-    "Phosani's Nightmare",
-    "Yama",
-    "Doom of Mokhaiotl",
-    "Chambers of Xeric",
-    "Tombs of Amascut",
-    "Theatre of Blood",
-    "Chambers of Xeric: Challenge Mode",
-    "Tombs of Amascut: Expert Mode",
-    "Theatre of Blood: Hard Mode",
-    "TzTok-Jad",
-    "Sol Heredit",
-    "TzKal-Zuk",
+    boss
+    for tier_bosses in BOSS_LADDER_TIERS.values()
+    for boss in tier_bosses
 ]
+
+BOSS_TIER_BY_NAME = {
+    boss: tier
+    for tier, tier_bosses in BOSS_LADDER_TIERS.items()
+    for boss in tier_bosses
+}
 
 RAID_METRICS = [
     "Chambers of Xeric",
@@ -129,7 +158,12 @@ def build_boss_progression(boss_kcs: dict[str, int], preview_limit: int = 8) -> 
         "totalTracked": len(BOSS_DIFFICULTY_ORDER),
         "untriedCount": len(untried),
         "nextUntried": [
-            {"name": name, "kc": boss_kcs.get(name, 0), "targetKc": 1}
+            {
+                "name": name,
+                "kc": boss_kcs.get(name, 0),
+                "targetKc": 1,
+                "tier": BOSS_TIER_BY_NAME.get(name, "Unranked"),
+            }
             for name in untried[:preview_limit]
         ],
     }
@@ -197,13 +231,15 @@ def build_boss_html(tracker, boss_kcs: dict[str, int]) -> str:
     else:
         content += (
             '<div style="margin-top:10px; font-size:12px; font-weight:700; color:#374151; '
-            'text-transform:uppercase; letter-spacing:.04em;">Next first kills - easier to harder</div>'
+            'text-transform:uppercase; letter-spacing:.04em;">Next first kills - Wiki ladder order</div>'
         )
         for index, item in enumerate(queue, start=1):
             prefix = "NEXT" if index == 1 else f"#{index}"
+            tier = item.get("tier", "")
             content += (
                 '<div style="font-size:12px; color:#374151; padding:3px 0;">'
-                f'<b>{prefix}: {item["name"]}</b> <span style="color:#6b7280;">&middot; goal: 1 KC</span></div>'
+                f'<b>{prefix}: {item["name"]}</b> '
+                f'<span style="color:#6b7280;">&middot; {tier} &middot; goal: 1 KC</span></div>'
             )
 
     return tracker.section("Boss Progression - Get 1 KC", content)
