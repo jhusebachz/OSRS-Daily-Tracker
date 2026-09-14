@@ -3,100 +3,6 @@
 from __future__ import annotations
 
 
-# Activity order from the official Old School HiScores lite feed, immediately
-# after the skill rows. Keep this list in feed order so CSV positions stay stable.
-HISCORE_ACTIVITIES = [
-    "Grid Points",
-    "League Points",
-    "Deadman Points",
-    "Bounty Hunter - Hunter",
-    "Bounty Hunter - Rogue",
-    "Bounty Hunter (Legacy) - Hunter",
-    "Bounty Hunter (Legacy) - Rogue",
-    "Clue Scrolls (all)",
-    "Clue Scrolls (beginner)",
-    "Clue Scrolls (easy)",
-    "Clue Scrolls (medium)",
-    "Clue Scrolls (hard)",
-    "Clue Scrolls (elite)",
-    "Clue Scrolls (master)",
-    "LMS - Rank",
-    "PvP Arena - Rank",
-    "Soul Wars Zeal",
-    "Rifts closed",
-    "Colosseum Glory",
-    "Collections Logged",
-    "Abyssal Sire",
-    "Alchemical Hydra",
-    "Amoxliatl",
-    "Araxxor",
-    "Artio",
-    "Barrows Chests",
-    "Bryophyta",
-    "Callisto",
-    "Cal'varion",
-    "Cerberus",
-    "Chambers of Xeric",
-    "Chambers of Xeric: Challenge Mode",
-    "Chaos Elemental",
-    "Chaos Fanatic",
-    "Commander Zilyana",
-    "Corporeal Beast",
-    "Crazy Archaeologist",
-    "Dagannoth Prime",
-    "Dagannoth Rex",
-    "Dagannoth Supreme",
-    "Deranged Archaeologist",
-    "Doom of Mokhaiotl",
-    "Duke Sucellus",
-    "General Graardor",
-    "Giant Mole",
-    "Grotesque Guardians",
-    "Hespori",
-    "Kalphite Queen",
-    "King Black Dragon",
-    "Kraken",
-    "Kree'Arra",
-    "K'ril Tsutsaroth",
-    "Lunar Chests",
-    "Mimic",
-    "Nex",
-    "Nightmare",
-    "Phosani's Nightmare",
-    "Obor",
-    "Phantom Muspah",
-    "Sarachnis",
-    "Scorpia",
-    "Scurrius",
-    "Shellbane Gryphon",
-    "Skotizo",
-    "Sol Heredit",
-    "Spindel",
-    "Tempoross",
-    "The Gauntlet",
-    "The Corrupted Gauntlet",
-    "The Hueycoatl",
-    "The Leviathan",
-    "The Royal Titans",
-    "The Whisperer",
-    "Theatre of Blood",
-    "Theatre of Blood: Hard Mode",
-    "Thermonuclear Smoke Devil",
-    "Tombs of Amascut",
-    "Tombs of Amascut: Expert Mode",
-    "TzKal-Zuk",
-    "TzTok-Jad",
-    "Vardorvis",
-    "Venenatis",
-    "Vet'ion",
-    "Vorkath",
-    "Wintertodt",
-    "Yama",
-    "Zalcano",
-    "Zulrah",
-]
-
-
 # Curated progression order, deliberately favoring approachable first kills before
 # mechanically demanding encounters. There is no official Jagex difficulty order;
 # this is a coaching queue, not a tier-list claim.
@@ -106,6 +12,7 @@ BOSS_DIFFICULTY_ORDER = [
     "Obor",
     "Bryophyta",
     "Scurrius",
+    "Brutus",
     "Giant Mole",
     "Barrows Chests",
     "Crazy Archaeologist",
@@ -119,6 +26,8 @@ BOSS_DIFFICULTY_ORDER = [
     "Zalcano",
     "Lunar Chests",
     "Amoxliatl",
+    "Mad Angel",
+    "Maggot King",
     "The Hueycoatl",
     "The Royal Titans",
     "Grotesque Guardians",
@@ -182,38 +91,30 @@ RAID_METRICS = [
 
 
 def fetch_boss_kcs(tracker, username: str) -> dict[str, int]:
-    """Fetch activity values from the same official lite HiScores feed as skills."""
+    """Fetch boss values by activity name from Jagex's JSON HiScores endpoint."""
     safe_name = username.replace(" ", "_")
-    url = f"https://secure.runescape.com/m=hiscore_oldschool/index_lite.ws?player={safe_name}"
+    url = f"https://secure.runescape.com/m=hiscore_oldschool/index_lite.json?player={safe_name}"
     response = tracker.requests.get(url, headers=tracker.HISCORE_HEADERS, timeout=10)
     response.raise_for_status()
-    lines = response.text.strip().splitlines()
-    activity_offset = len(tracker.HISCORE_SKILLS)
+    payload = response.json()
     tracked = set(BOSS_DIFFICULTY_ORDER)
     boss_kcs: dict[str, int] = {}
 
-    for index, activity in enumerate(HISCORE_ACTIVITIES):
-        if activity not in tracked:
+    for activity in payload.get("activities", []):
+        if not isinstance(activity, dict):
+            continue
+        name = activity.get("name")
+        if name not in tracked:
             continue
 
-        line_index = activity_offset + index
-        if line_index >= len(lines):
-            boss_kcs[activity] = 0
-            continue
-
-        parts = lines[line_index].strip().split(",")
-        if len(parts) < 2:
-            boss_kcs[activity] = 0
-            continue
-
+        score = activity.get("score", -1)
         try:
-            score = int(parts[1])
-        except ValueError:
-            score = -1
-        boss_kcs[activity] = max(score, 0)
+            boss_kcs[str(name)] = max(int(score), 0)
+        except (TypeError, ValueError):
+            boss_kcs[str(name)] = 0
 
-    # Keep every configured boss present so the queue remains deterministic even
-    # if a newly-added HiScores row is temporarily unavailable.
+    # Keep every configured boss present so the queue remains deterministic if a
+    # single activity is temporarily omitted from the upstream response.
     for activity in BOSS_DIFFICULTY_ORDER:
         boss_kcs.setdefault(activity, 0)
 
@@ -265,6 +166,9 @@ def build_weekly_raid_goal(
         }
         for metric in RAID_METRICS
     ]
+
+    # Binary on purpose: Expert/Hard modes can overlap with a parent raid metric,
+    # but the user's goal is simply whether at least one raid was completed.
     completed = 1 if any(item["gained"] > 0 for item in gains) else 0
 
     return {
@@ -323,9 +227,10 @@ Counts CoX (regular or CM), Tombs of Amascut (regular or expert), or Theatre of 
     gains = raid_goal.get("gainsByRaid", [])
     if completed >= target:
         names = ", ".join(item.get("name", "Raid") for item in gains if item.get("gained", 0) > 0)
+        suffix = f" - {names}" if names else ""
         content += (
             '<div style="font-size:13px; color:#16a34a; font-weight:700; margin-top:8px;">'
-            f'Weekly raid goal complete{f" - {names}" if names else ""}.</div>'
+            f"Weekly raid goal complete{suffix}.</div>"
         )
     else:
         content += '<div style="font-size:13px; color:#b45309; font-weight:700; margin-top:8px;">One raid completion still needed this week.</div>'
