@@ -13,6 +13,7 @@ from main import (
     build_plain_text,
     build_snapshot_metadata,
     effective_levels_remaining,
+    max_progress_html,
 )
 
 
@@ -420,7 +421,13 @@ class EffectiveHoursTests(unittest.TestCase):
         goal_one_section = html.split("Still needed", 1)[1]
         self.assertLess(goal_one_section.index("Hunter"), goal_one_section.index("Runecraft"))
 
-        closest_to_99 = html.split("Closest to 99", 1)[1]
+        max_stats = build_stats(
+            {
+                "agility": {"level": 98, "experience": 12950000},
+                "runecraft": {"level": 98, "experience": 12900000},
+            }
+        )
+        closest_to_99 = max_progress_html(max_stats, {}).split("Closest to 99", 1)[1]
         self.assertLess(closest_to_99.index("Agility"), closest_to_99.index("Runecraft"))
 
     def test_last_seven_days_top_skills_aggregate_across_the_full_window(self):

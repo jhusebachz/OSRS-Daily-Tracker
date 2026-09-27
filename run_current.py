@@ -20,7 +20,11 @@ tracker.FRIENDS = ["3Sixteen", "beefmissle13", "kingxdabber", "hedith", "TooClos
 # Base 92s remains the dated skill goal. Diary requirements are milestone-based.
 tracker.GOAL_ONE_DATE = date(2026, 12, 31)
 
-_latest_boss_kcs: dict[str, int] = {}
+_latest_boss_kcs_by_player: dict[str, dict[str, int]] = {}
+_latest_daily_boss_activity: dict = {
+    "byPlayer": {},
+    "topPlayers": [],
+}
 _latest_raid_goal: dict = {
     "target": 1,
     "completed": 0,
@@ -49,14 +53,13 @@ _original_fetch_player = tracker.fetch_player
 
 
 def fetch_player_with_bosses(username: str) -> dict:
-    global _latest_boss_kcs
+    global _latest_boss_kcs_by_player
 
     stats = _original_fetch_player(username)
-    if username == tracker.USERNAME:
-        try:
-            _latest_boss_kcs = boss_progression.fetch_boss_kcs(tracker, username)
-        except Exception as error:  # noqa: BLE001 - keep daily report alive if activity rows fail
-            print(f"Warning: could not fetch boss HiScores for {username}: {error}")
+    try:
+        _latest_boss_kcs_by_player[username] = boss_progression.fetch_boss_kcs(tracker, username)
+    except Exception as error:  # noqa: BLE001 - keep daily report alive if activity rows fail
+        print(f"Warning: could not fetch boss HiScores for {username}: {error}")
     return stats
 
 
@@ -75,7 +78,7 @@ def build_current_week_summary_with_raids(
     report_date_key: str,
     last_seven_days_summary: dict,
 ) -> dict:
-    global _latest_boss_kcs, _latest_raid_goal
+    global _latest_boss_kcs_by_player, _latest_daily_boss_activity, _latest_raid_goal
 
     summary = _original_build_current_week_summary(
         previous_all,
@@ -85,25 +88,36 @@ def build_current_week_summary_with_raids(
         last_seven_days_summary,
     )
 
-    if not _latest_boss_kcs:
-        previous_bosses = (
-            previous_all.get(tracker.METADATA_KEY, {})
-            .get("bosses", {})
-            .get(username, {})
-        )
-        if isinstance(previous_bosses, dict):
-            _latest_boss_kcs = {
-                str(name): max(int(kc), 0)
-                for name, kc in previous_bosses.items()
-                if isinstance(kc, (int, float))
-            }
+    player_order = [tracker.USERNAME, *tracker.FRIENDS]
+    resolved_bosses: dict[str, dict[str, int]] = {}
+
+    for player in player_order:
+        current = _latest_boss_kcs_by_player.get(player)
+        if isinstance(current, dict):
+            resolved_bosses[player] = boss_progression.normalize_boss_kcs(current)
+            continue
+
+        # A transient activity-endpoint failure should retain the last known
+        # official snapshot and produce no false-positive gains.
+        previous = boss_progression.get_previous_boss_kcs(previous_all, tracker, player)
+        if previous is not None:
+            resolved_bosses[player] = previous
+
+    _latest_boss_kcs_by_player = resolved_bosses
+    _latest_daily_boss_activity = boss_progression.build_daily_boss_activity(
+        tracker,
+        _latest_boss_kcs_by_player,
+        previous_all,
+        player_order,
+    )
+    primary_boss_kcs = _latest_boss_kcs_by_player.get(username, {})
 
     _latest_raid_goal = boss_progression.build_weekly_raid_goal(
         tracker,
         summary,
         previous_all,
         username,
-        _latest_boss_kcs,
+        primary_boss_kcs,
     )
     summary["raidGoal"] = _latest_raid_goal
     return summary
@@ -112,7 +126,7 @@ def build_current_week_summary_with_raids(
 tracker.build_current_week_summary = build_current_week_summary_with_raids
 
 
-# Persist the boss KC snapshot and the already-sorted first-KC queue for Johnny.
+# Persist boss KC, daily player activity, and the full tiered checklist for Johnny.
 _original_build_snapshot_metadata = tracker.build_snapshot_metadata
 
 
@@ -132,9 +146,12 @@ def build_snapshot_metadata_with_bosses(
         current_week_summary,
         report_date_key,
     )
-    metadata["bosses"] = {username: _latest_boss_kcs}
+    metadata["bosses"] = _latest_boss_kcs_by_player
+    metadata["dailyBossActivity"] = _latest_daily_boss_activity
     metadata["bossProgression"] = {
-        username: boss_progression.build_boss_progression(_latest_boss_kcs)
+        username: boss_progression.build_boss_progression(
+            _latest_boss_kcs_by_player.get(username, {})
+        )
     }
     return metadata
 
@@ -164,12 +181,52 @@ tracker.total_level_html = diary_goal_html
 def boss_and_raid_goal_html(_stats: dict, _gains: dict) -> str:
     return boss_progression.build_boss_and_raid_html(
         tracker,
-        _latest_boss_kcs,
+        _latest_boss_kcs_by_player.get(tracker.USERNAME, {}),
         _latest_raid_goal,
+        _latest_daily_boss_activity,
     )
 
 
 tracker.max_progress_html = boss_and_raid_goal_html
+
+
+_original_build_plain_text = tracker.build_plain_text
+
+
+def build_plain_text_with_boss_activity(
+    your_gains: dict,
+    friends_data: dict,
+    previous_all: dict,
+    effective_hours_summary: dict,
+    last_seven_days_summary: dict,
+    current_week_summary: dict,
+) -> str:
+    report = _original_build_plain_text(
+        your_gains,
+        friends_data,
+        previous_all,
+        effective_hours_summary,
+        last_seven_days_summary,
+        current_week_summary,
+    )
+    top_players = _latest_daily_boss_activity.get("topPlayers", [])
+    if not top_players:
+        return report
+
+    lines = [report, "", "BOSS KILLS SINCE LAST UPDATE"]
+    for rank, player in enumerate(top_players, start=1):
+        lines.append(
+            f'{rank}. {player["name"]} - {player["totalBossKcGained"]:,} KC'
+        )
+        lines.extend(
+            f"   {boss} +{gained:,}"
+            for boss, gained in player.get("bossGains", {}).items()
+        )
+
+    return "\n".join(lines)
+
+
+tracker.build_plain_text = build_plain_text_with_boss_activity
 
 
 def current_coaching_html(stats: dict) -> str:
@@ -179,9 +236,9 @@ def current_coaching_html(stats: dict) -> str:
         if skill in stats and stats[skill]["level"] < tracker.goal_one_target_level(skill)
     ]
     diary_summary = progression_goals.build_diary_summary(tracker, stats)
-    boss_summary = boss_progression.build_boss_progression(_latest_boss_kcs)
-    next_bosses = boss_summary.get("nextUntried", [])
-    next_boss = next_bosses[0]["name"] if next_bosses else None
+    boss_summary = boss_progression.build_boss_progression(
+        _latest_boss_kcs_by_player.get(tracker.USERNAME, {})
+    )
     raid_done = int(_latest_raid_goal.get("completed", 0)) >= int(_latest_raid_goal.get("target", 1))
 
     paragraphs = [
@@ -202,9 +259,8 @@ def current_coaching_html(stats: dict) -> str:
             )
         ),
         (
-            f'Next first-KC target: <b>{next_boss}</b>.'
-            if next_boss
-            else "First-KC boss queue is complete."
+            f'Boss checklist: <b>{boss_summary["triedCount"]}/{boss_summary["totalTracked"]} complete</b>; '
+            f'{boss_summary["untriedCount"]} still need a first KC.'
         ),
         (
             "Weekly raid: <b>complete</b>."

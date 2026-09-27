@@ -35,8 +35,10 @@ This repository is the source of truth for the live OSRS snapshot data used else
 ```text
 .
 |-- .github/workflows/daily.yml   # Scheduled GitHub Actions workflow
+|-- boss_progression.py           # Boss ladder, KC deltas, and weekly raid goal
 |-- data/last_stats.json          # Latest saved hiscore snapshot
 |-- main.py                       # Tracker, goal logic, and email generation
+|-- run_current.py                # Current roster and goal configuration entrypoint
 |-- requirements.txt              # Python dependencies
 `-- README.md
 ```
@@ -47,6 +49,52 @@ The tracker writes a JSON file at [`data/last_stats.json`](./data/last_stats.jso
 
 ```json
 {
+  "_meta": {
+    "bosses": {
+      "jhusebachz": {
+        "Vorkath": 407
+      },
+      "3Sixteen": {
+        "Zulrah": 25
+      }
+    },
+    "dailyBossActivity": {
+      "byPlayer": {
+        "jhusebachz": {
+          "totalBossKcGained": 8,
+          "bossGains": {
+            "Vorkath": 5,
+            "Phantom Muspah": 3
+          }
+        }
+      },
+      "topPlayers": [
+        {
+          "name": "jhusebachz",
+          "totalBossKcGained": 8,
+          "bossGains": {
+            "Vorkath": 5,
+            "Phantom Muspah": 3
+          }
+        }
+      ]
+    },
+    "bossProgression": {
+      "jhusebachz": {
+        "triedCount": 37,
+        "totalTracked": 71,
+        "untriedCount": 34,
+        "remainingByTier": {
+          "Easy": [],
+          "Medium": [{ "name": "Sarachnis", "kc": 0, "targetKc": 1, "tier": "Medium" }],
+          "Hard": [],
+          "Elite": [],
+          "Master": [],
+          "Grandmaster": []
+        }
+      }
+    }
+  },
   "jhusebachz": {
     "overall": {
       "rank": 0,
@@ -68,6 +116,8 @@ Each tracked player includes:
 - every tracked OSRS skill in hiscore order
 - `rank`, `level`, and `experience` for each entry
 
+Boss KC is fetched by activity name from Jagex's official JSON HiScores endpoint. `_meta.bosses` stores the latest configured boss KC for every tracked player, `_meta.dailyBossActivity` stores positive changes since the prior snapshot plus the already-ranked top three players, and `_meta.bossProgression` stores the primary account's complete tiered first-KC checklist. A missing previous boss snapshot establishes a baseline and never reports historical KC as a new gain.
+
 ## Automation
 
 The scheduled workflow lives in [`daily.yml`](./.github/workflows/daily.yml).
@@ -77,7 +127,7 @@ Current behavior:
 - runs on a daily cron schedule
 - can also be triggered manually with `workflow_dispatch`
 - installs Python dependencies
-- runs [`main.py`](./main.py)
+- runs [`run_current.py`](./run_current.py)
 - commits the updated snapshot JSON back into the repo
 
 ## Required Secrets
@@ -116,7 +166,7 @@ $env:EMAIL_PASS="your-app-password"
 4. Run the tracker:
 
 ```bash
-python main.py
+python run_current.py
 ```
 
 ## Personal Goals Tracked
@@ -136,7 +186,7 @@ The daily report now evaluates each goal in two ways:
 
 ## Notes
 
-- Hiscores are fetched from the official Jagex lite hiscore endpoint.
+- Skills are fetched from the official Jagex lite HiScores feed; boss KC is fetched from the official JSON HiScores endpoint by activity name.
 - The script intentionally spaces requests slightly to stay polite to the API.
 - The repo stores the latest snapshot only, not a full history database.
 - If a friend lookup fails, the script continues and reports the issue instead of failing the full run.
