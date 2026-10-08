@@ -15,7 +15,17 @@ import progression_goals
 
 # Active friend roster. 3Sixteen is the current name of the account formerly
 # tracked as gwahpy.
-tracker.FRIENDS = ["3Sixteen", "beefmissle13", "kingxdabber", "hedith", "TooClose42"]
+tracker.FRIENDS = [
+    "3Sixteen",
+    "beefmissle13",
+    "kingxdabber",
+    "hedith",
+    "TooClose42",
+    "HB_Reborn",
+    "Dummyhead38",
+    "RebelMontana",
+    "Kriid",
+]
 
 # Base 92s remains the dated skill goal. Diary requirements are milestone-based.
 tracker.GOAL_ONE_DATE = date(2026, 12, 31)

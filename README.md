@@ -120,6 +120,12 @@ Boss KC is fetched by activity name from Jagex's official JSON HiScores endpoint
 
 ## Automation
 
+The active friend roster in `run_current.py` is `3Sixteen`, `beefmissle13`,
+`kingxdabber`, `hedith`, `TooClose42`, `HB_Reborn`, `Dummyhead38`, `RebelMontana`,
+and `Kriid`. Their skill XP and boss KC snapshots feed both the daily email and
+Lil Johnny. A new friend's first snapshot establishes a baseline; later runs
+report gains from that baseline instead of counting historical progress as new.
+
 The scheduled workflow lives in [`daily.yml`](./.github/workflows/daily.yml).
 
 Current behavior:
