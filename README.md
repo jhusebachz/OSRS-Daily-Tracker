@@ -4,6 +4,8 @@
 
 Automated Old School RuneScape progress tracking for `jhusebachz` and a small comparison group.
 
+`JorbisBTW` is also tracked as a separate Ironman account. Both HTML and plain-text emails include its total level, total account XP, daily XP, and top gains. Its raw stats and daily summary are published in the same app feed. The first successful lookup establishes a baseline; the main account's goals and friend comparisons stay separate.
+
 This project pulls fresh hiscores from the official OSRS hiscore API, compares the latest numbers against the previous saved snapshot, generates a polished daily progress email, and commits the newest raw stats JSON back into the repository for downstream use.
 
 ## What It Does

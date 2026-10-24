@@ -98,7 +98,7 @@ def build_current_week_summary_with_raids(
         last_seven_days_summary,
     )
 
-    player_order = [tracker.USERNAME, *tracker.FRIENDS]
+    player_order = [tracker.USERNAME, *tracker.OWN_ACCOUNTS, *tracker.FRIENDS]
     resolved_bosses: dict[str, dict[str, int]] = {}
 
     for player in player_order:
