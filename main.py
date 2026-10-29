@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import smtplib
+import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
@@ -20,10 +21,12 @@ from email.mime.text import MIMEText
 from zoneinfo import ZoneInfo
 
 import requests
+import ironman_comparison
 
 
 USERNAME = "jhusebachz"
 OWN_ACCOUNTS = {"JorbisBTW": "Ironman"}
+IRONMAN_ACCOUNTS = {**OWN_ACCOUNTS, "IronXDabber": "Ironman"}
 FRIENDS = ["gwahpy", "beefmissle13", "kingxdabber", "hedith", "TooClose42"]
 
 DATA_FILE = "data/last_stats.json"
@@ -301,7 +304,7 @@ def build_daily_summary(
     }
     your_total_xp = by_player[username]["totalXp"]
 
-    for friend in [*OWN_ACCOUNTS, *FRIENDS]:
+    for friend in [*IRONMAN_ACCOUNTS, *FRIENDS]:
         if friend not in friends_data:
             continue
 
@@ -311,7 +314,7 @@ def build_daily_summary(
             friend_gains,
             friends_data[friend],
         )
-        if friend not in OWN_ACCOUNTS:
+        if friend not in IRONMAN_ACCOUNTS:
             friend_summary["diff"] = your_total_xp - friend_summary["totalXp"]
         by_player[friend] = friend_summary
 
@@ -1311,51 +1314,6 @@ def last_seven_days_html(last_seven_days_summary: dict) -> str:
     return section("Last 7 Days", content)
 
 
-def build_own_account_reports(accounts_data: dict, previous_all: dict) -> list[dict]:
-    """Keep alt-account progress separate from the main account and friends."""
-    daily = build_daily_summary(
-        USERNAME, {}, {}, accounts_data, previous_all, get_report_date_key()
-    )["byPlayer"]
-    reports = []
-    for username, account_type in OWN_ACCOUNTS.items():
-        stats = accounts_data.get(username)
-        available = isinstance(stats, dict) and isinstance(stats.get("overall"), dict)
-        reports.append({
-            "name": username,
-            "accountType": account_type,
-            "available": available,
-            "totalLevel": stats["overall"]["level"] if available else 0,
-            "totalXp": stats["overall"]["experience"] if available else 0,
-            "gainedXp": daily.get(username, {}).get("totalXp", 0),
-            "topSkills": daily.get(username, {}).get("topSkills", []),
-            "hasBaseline": isinstance(previous_all.get(username), dict),
-        })
-    return reports
-
-
-def own_accounts_html(accounts_data: dict, previous_all: dict) -> str:
-    sections = []
-    for account in build_own_account_reports(accounts_data, previous_all):
-        if account["available"]:
-            daily_xp = f'{account["gainedXp"]:,}' if account["hasBaseline"] else "Baseline established"
-            content = (
-                '<table width="100%" cellpadding="0" cellspacing="0">'
-                + row("Total level", f'{account["totalLevel"]:,}')
-                + row("Total account XP", f'{account["totalXp"]:,}')
-                + row("XP gained today", daily_xp)
-                + "</table>"
-            )
-            for skill in account["topSkills"]:
-                content += (
-                    '<div style="font-size:13px; color:#374151; padding:3px 0;">'
-                    f'<b>{format_skill_name(skill["skill"])}</b>: +{skill["xp"]:,} xp</div>'
-                )
-        else:
-            content = '<p style="color:#6b7280; font-size:13px;">HiScores data unavailable. Tracking resumes after a successful lookup.</p>'
-        sections.append(section(f'{account["name"]} - {account["accountType"]}', content))
-    return "".join(sections)
-
-
 def build_html_email(
     your_gains: dict,
     your_stats: dict,
@@ -1364,6 +1322,7 @@ def build_html_email(
     effective_hours_summary: dict,
     last_seven_days_summary: dict,
     current_week_summary: dict,
+    ironman_report: dict | None = None,
 ) -> str:
     your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
     today = get_tracker_now().strftime("%B %d, %Y")
@@ -1413,7 +1372,10 @@ def build_html_email(
 
     body = (
         header_section
-        + own_accounts_html(friends_data, previous_all)
+        + ironman_comparison.build_html(
+            sys.modules[__name__],
+            ironman_report if ironman_report is not None else ironman_comparison.build_comparison(sys.modules[__name__], friends_data, previous_all),
+        )
         + friend_comparison_html(your_gains, friends_data, previous_all)
         + last_seven_days_html(last_seven_days_summary)
         + goal_one_html(your_stats, your_gains)
@@ -1460,6 +1422,7 @@ def build_plain_text(
     effective_hours_summary: dict,
     last_seven_days_summary: dict,
     current_week_summary: dict,
+    ironman_report: dict | None = None,
 ) -> str:
     your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
     lines = [
@@ -1502,21 +1465,10 @@ def build_plain_text(
         hours_suffix = f" | {friend_effective_hours:.1f}h played" if friend_effective_hours > 0 else ""
         lines.append(f"{friend}: {friend_xp:,} xp ({status}){hours_suffix}")
 
-    for account in build_own_account_reports(friends_data, previous_all):
-        lines.extend(["", f'{account["name"]} - {account["accountType"]}'])
-        if not account["available"]:
-            lines.append("HiScores data unavailable. Tracking resumes after a successful lookup.")
-            continue
-        lines.append(f'Total level: {account["totalLevel"]:,}')
-        lines.append(f'Total account XP: {account["totalXp"]:,}')
-        lines.append(
-            f'XP gained today: {account["gainedXp"]:,}'
-            if account["hasBaseline"] else "Baseline established; daily gains begin with the next snapshot."
-        )
-        lines.extend(
-            f'- {format_skill_name(skill["skill"])}: +{skill["xp"]:,} xp'
-            for skill in account["topSkills"]
-        )
+    lines.extend(["", ironman_comparison.build_plain_text(
+        sys.modules[__name__],
+        ironman_report if ironman_report is not None else ironman_comparison.build_comparison(sys.modules[__name__], friends_data, previous_all),
+    )])
 
     return "\n".join(lines)
 
@@ -1526,7 +1478,7 @@ def fetch_all_stats() -> tuple[dict, dict]:
     time.sleep(1)
 
     friends_data = {}
-    for friend in [*OWN_ACCOUNTS, *FRIENDS]:
+    for friend in [*IRONMAN_ACCOUNTS, *FRIENDS]:
         try:
             friends_data[friend] = fetch_player(friend)
         except Exception as error:  # noqa: BLE001 - one bad friend fetch should not kill the run
@@ -1566,6 +1518,10 @@ def main() -> None:
         current_week_summary,
         report_date_key,
     )
+    ironman_report = ironman_comparison.build_comparison(
+        sys.modules[__name__], friends_data, previous_all, snapshot_metadata["generatedAt"]
+    )
+    snapshot_metadata["ironmanComparison"] = ironman_report
 
     print(f"Latest OSRS pull timestamp: {snapshot_metadata['generatedAt']} ({TRACKER_TIME_ZONE} report date {report_date_key})")
 
@@ -1583,6 +1539,7 @@ def main() -> None:
         effective_hours_summary,
         last_seven_days_summary,
         current_week_summary,
+        ironman_report,
     )
     plain_email = build_plain_text(
         your_gains,
@@ -1591,6 +1548,7 @@ def main() -> None:
         effective_hours_summary,
         last_seven_days_summary,
         current_week_summary,
+        ironman_report,
     )
 
     print(plain_email)

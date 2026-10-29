@@ -98,7 +98,7 @@ def build_current_week_summary_with_raids(
         last_seven_days_summary,
     )
 
-    player_order = [tracker.USERNAME, *tracker.OWN_ACCOUNTS, *tracker.FRIENDS]
+    player_order = [tracker.USERNAME, *tracker.IRONMAN_ACCOUNTS, *tracker.FRIENDS]
     resolved_bosses: dict[str, dict[str, int]] = {}
 
     for player in player_order:
@@ -210,6 +210,7 @@ def build_plain_text_with_boss_activity(
     effective_hours_summary: dict,
     last_seven_days_summary: dict,
     current_week_summary: dict,
+    ironman_report: dict | None = None,
 ) -> str:
     report = _original_build_plain_text(
         your_gains,
@@ -218,6 +219,7 @@ def build_plain_text_with_boss_activity(
         effective_hours_summary,
         last_seven_days_summary,
         current_week_summary,
+        ironman_report,
     )
     top_players = _latest_daily_boss_activity.get("topPlayers", [])
     if not top_players:
