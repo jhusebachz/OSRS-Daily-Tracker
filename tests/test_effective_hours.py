@@ -318,7 +318,7 @@ class EffectiveHoursTests(unittest.TestCase):
         self.assertEqual(metadata["reportDateKey"], "2026-05-17")
         self.assertEqual(metadata["timeZone"], "America/New_York")
 
-    def test_goal_two_html_uses_levels_still_needed_and_goal_three_has_clean_separators(self):
+    def test_removed_goal_two_stays_absent_and_remaining_sections_have_clean_separators(self):
         stats = build_stats(
             {
                 "hunter": {"experience": GOAL_PROGRESS_BASELINE["hunter"]["experience"] + 98000},
@@ -362,14 +362,15 @@ class EffectiveHoursTests(unittest.TestCase):
             },
         )
 
-        self.assertIn("Levels still needed", html)
-        self.assertIn("Fastest next levels", html)
+        self.assertNotIn("Goal 2", html)
+        self.assertNotIn("Levels still needed", html)
+        self.assertNotIn("Fastest next levels", html)
         self.assertIn("Effective hours played since last report", html)
         self.assertNotIn("This week:", html)
         self.assertNotIn("full levels/day", html)
         self.assertNotIn("Â·", html)
         self.assertIn("Top skills", html)
-        closest_to_99 = html.split("Closest to 99", 1)[1]
+        closest_to_99 = html.split("Closest to 99", 1)[1].split("Current Account Stats", 1)[0]
         self.assertNotIn("Attack", closest_to_99)
 
     def test_goal_one_and_goal_three_follow_app_ordering(self):

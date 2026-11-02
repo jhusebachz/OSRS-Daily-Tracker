@@ -10,7 +10,6 @@ from datetime import date
 
 import boss_progression
 import main as tracker
-import progression_goals
 
 
 # Active friend roster. 3Sixteen is the current name of the account formerly
@@ -27,7 +26,7 @@ tracker.FRIENDS = [
     "Kriid",
 ]
 
-# Base 92s remains the dated skill goal. Diary requirements are milestone-based.
+# Base 92s remains the dated skill goal.
 tracker.GOAL_ONE_DATE = date(2026, 12, 31)
 
 _latest_boss_kcs_by_player: dict[str, dict[str, int]] = {}
@@ -179,14 +178,6 @@ def goal_one_html_year_end(stats: dict, gains: dict) -> str:
 tracker.goal_one_html = goal_one_html_year_end
 
 
-# Goal 2 is now the exact skill-level checklist needed for every Achievement Diary.
-def diary_goal_html(stats: dict, _gains: dict) -> str:
-    return progression_goals.build_diary_goal_html(tracker, stats)
-
-
-tracker.total_level_html = diary_goal_html
-
-
 # Reuse the former max-cape report slot for first-KC progression + the weekly raid.
 def boss_and_raid_goal_html(_stats: dict, _gains: dict) -> str:
     return boss_progression.build_boss_and_raid_html(
@@ -247,7 +238,6 @@ def current_coaching_html(stats: dict) -> str:
         for skill in tracker.SKILLS
         if skill in stats and stats[skill]["level"] < tracker.goal_one_target_level(skill)
     ]
-    diary_summary = progression_goals.build_diary_summary(tracker, stats)
     boss_summary = boss_progression.build_boss_progression(
         _latest_boss_kcs_by_player.get(tracker.USERNAME, {})
     )
@@ -260,14 +250,6 @@ def current_coaching_html(stats: dict) -> str:
                 "Keep chipping away at the remaining base levels."
                 if base_remaining
                 else "Base goal complete."
-            )
-        ),
-        (
-            f'Achievement Diary levels: <b>{diary_summary["completed"]}/{diary_summary["total"]} complete</b>. '
-            + (
-                f'{len(diary_summary["remaining"])} skill requirements remain.'
-                if diary_summary["remaining"]
-                else "All diary skill requirements are met."
             )
         ),
         (

@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 import ironman_comparison
+import account_stats
 
 
 USERNAME = "jhusebachz"
@@ -1323,6 +1324,7 @@ def build_html_email(
     last_seven_days_summary: dict,
     current_week_summary: dict,
     ironman_report: dict | None = None,
+    account_report: dict | None = None,
 ) -> str:
     your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
     today = get_tracker_now().strftime("%B %d, %Y")
@@ -1379,9 +1381,14 @@ def build_html_email(
         + friend_comparison_html(your_gains, friends_data, previous_all)
         + last_seven_days_html(last_seven_days_summary)
         + goal_one_html(your_stats, your_gains)
-        + total_level_html(your_stats, your_gains)
         + max_progress_html(your_stats, your_gains)
         + coaching_html(your_stats)
+        + account_stats.build_html(
+            sys.modules[__name__],
+            account_report if account_report is not None else account_stats.build_report(
+                sys.modules[__name__], {USERNAME: your_stats, **friends_data}, None
+            ),
+        )
     )
 
     return f"""
@@ -1522,6 +1529,9 @@ def main() -> None:
         sys.modules[__name__], friends_data, previous_all, snapshot_metadata["generatedAt"]
     )
     snapshot_metadata["ironmanComparison"] = ironman_report
+    account_report = account_stats.build_report(
+        sys.modules[__name__], {USERNAME: your_stats, **friends_data}, snapshot_metadata["generatedAt"]
+    )
 
     print(f"Latest OSRS pull timestamp: {snapshot_metadata['generatedAt']} ({TRACKER_TIME_ZONE} report date {report_date_key})")
 
@@ -1540,6 +1550,7 @@ def main() -> None:
         last_seven_days_summary,
         current_week_summary,
         ironman_report,
+        account_report,
     )
     plain_email = build_plain_text(
         your_gains,
@@ -1550,6 +1561,9 @@ def main() -> None:
         current_week_summary,
         ironman_report,
     )
+    # Append after any entrypoint extensions (including boss activity), so stats
+    # always remain the final report section in both MIME alternatives.
+    plain_email += "\n\n" + account_stats.build_plain_text(sys.modules[__name__], account_report)
 
     print(plain_email)
 
