@@ -23,6 +23,8 @@ from zoneinfo import ZoneInfo
 import requests
 import ironman_comparison
 import account_stats
+import ironman_milestones
+import max_pace
 
 
 USERNAME = "jhusebachz"
@@ -37,7 +39,7 @@ TRACKER_ZONE = ZoneInfo(TRACKER_TIME_ZONE)
 
 GOAL_ONE_DATE = date(2026, 10, 3)
 GOAL_RUNEFEST_DATE = date(2026, 10, 3)
-GOAL_MAX_DATE = date(2027, 3, 15)
+GOAL_MAX_DATE = max_pace.DEADLINE
 GOAL_PROGRESS_START = date(2026, 3, 25)
 
 GOAL_RUNEFEST_LEVEL = 2250
@@ -305,7 +307,7 @@ def build_daily_summary(
     }
     your_total_xp = by_player[username]["totalXp"]
 
-    for friend in [*IRONMAN_ACCOUNTS, *FRIENDS]:
+    for friend in dict.fromkeys([*IRONMAN_ACCOUNTS, *FRIENDS]):
         if friend not in friends_data:
             continue
 
@@ -315,7 +317,7 @@ def build_daily_summary(
             friend_gains,
             friends_data[friend],
         )
-        if friend not in IRONMAN_ACCOUNTS:
+        if friend in FRIENDS:
             friend_summary["diff"] = your_total_xp - friend_summary["totalXp"]
         by_player[friend] = friend_summary
 
@@ -1374,9 +1376,10 @@ def build_html_email(
 
     body = (
         header_section
-        + ironman_comparison.build_html(
+        + max_pace.build_html(sys.modules[__name__], max_pace.build_summary(sys.modules[__name__], your_stats))
+        + ironman_milestones.build_html(
             sys.modules[__name__],
-            ironman_report if ironman_report is not None else ironman_comparison.build_comparison(sys.modules[__name__], friends_data, previous_all),
+            ironman_milestones.build_summary(sys.modules[__name__], friends_data.get("JorbisBTW"), previous_all.get("JorbisBTW")),
         )
         + friend_comparison_html(your_gains, friends_data, previous_all)
         + last_seven_days_html(last_seven_days_summary)
@@ -1430,6 +1433,7 @@ def build_plain_text(
     last_seven_days_summary: dict,
     current_week_summary: dict,
     ironman_report: dict | None = None,
+    your_stats: dict | None = None,
 ) -> str:
     your_total_xp = sum(value for skill, value in your_gains.items() if skill in SKILLS)
     lines = [
@@ -1472,9 +1476,14 @@ def build_plain_text(
         hours_suffix = f" | {friend_effective_hours:.1f}h played" if friend_effective_hours > 0 else ""
         lines.append(f"{friend}: {friend_xp:,} xp ({status}){hours_suffix}")
 
-    lines.extend(["", ironman_comparison.build_plain_text(
-        sys.modules[__name__],
-        ironman_report if ironman_report is not None else ironman_comparison.build_comparison(sys.modules[__name__], friends_data, previous_all),
+    if your_stats is not None:
+        lines.extend(["", max_pace.build_plain_text(
+            sys.modules[__name__], max_pace.build_summary(sys.modules[__name__], your_stats)
+        )])
+    lines.extend(["", ironman_milestones.build_plain_text(
+        sys.modules[__name__], ironman_milestones.build_summary(
+            sys.modules[__name__], friends_data.get("JorbisBTW"), previous_all.get("JorbisBTW")
+        ),
     )])
 
     return "\n".join(lines)
@@ -1485,7 +1494,7 @@ def fetch_all_stats() -> tuple[dict, dict]:
     time.sleep(1)
 
     friends_data = {}
-    for friend in [*IRONMAN_ACCOUNTS, *FRIENDS]:
+    for friend in dict.fromkeys([*IRONMAN_ACCOUNTS, *FRIENDS]):
         try:
             friends_data[friend] = fetch_player(friend)
         except Exception as error:  # noqa: BLE001 - one bad friend fetch should not kill the run
@@ -1529,6 +1538,10 @@ def main() -> None:
         sys.modules[__name__], friends_data, previous_all, snapshot_metadata["generatedAt"]
     )
     snapshot_metadata["ironmanComparison"] = ironman_report
+    snapshot_metadata["maxCapePace"] = max_pace.build_summary(sys.modules[__name__], your_stats, report_now.date())
+    snapshot_metadata["ironmanMilestone"] = ironman_milestones.build_summary(
+        sys.modules[__name__], friends_data.get("JorbisBTW"), previous_all.get("JorbisBTW")
+    )
     account_report = account_stats.build_report(
         sys.modules[__name__], {USERNAME: your_stats, **friends_data}, snapshot_metadata["generatedAt"]
     )
@@ -1560,6 +1573,7 @@ def main() -> None:
         last_seven_days_summary,
         current_week_summary,
         ironman_report,
+        your_stats=your_stats,
     )
     # Append after any entrypoint extensions (including boss activity), so stats
     # always remain the final report section in both MIME alternatives.

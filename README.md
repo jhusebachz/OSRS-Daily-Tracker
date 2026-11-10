@@ -4,7 +4,9 @@
 
 Automated Old School RuneScape progress tracking for `jhusebachz` and a small comparison group.
 
-`JorbisBTW` and `IronXDabber` have a side-by-side Ironman comparison in both HTML and plain-text emails. It shows total level and XP, levels and XP gained since the previous paired report, and each account's top five skill gains ranked by XP (with levels gained). `_meta.ironmanComparison` publishes the same result for Lil Johnny, including the exact comparison timestamps. The first successful paired lookup establishes a shared baseline; if either lookup fails, both baselines are retained so the next comparison still covers the same interval for both accounts. Main-account goals and friend comparisons remain separate.
+`JorbisBTW` has an Ironman base-level ladder (30, 40, 50, 60, 70, 80, 90, and 99), with no imposed hours or deadline. It tracks total level, how many skills meet the current tier, the remaining skills, and a preview of the next tier. `IronXDabber` now appears in the ordinary friends comparison; the former head-to-head rivalry is no longer shown. Legacy paired-comparison metadata is retained for compatibility.
+
+The main account's Max Cape deadline is **December 31, 2027**. Its cumulative hours-ahead/behind figure compares the training hours completed since the fixed November 10, 2026 HiScores baseline with the hours expected by the report date. Combat skills are tracked toward 99 but excluded from the hours clock because Slayer trains them simultaneously. Both goals are published in `_meta.maxCapePace` and `_meta.ironmanMilestone` for Lil Johnny.
 
 The achievement diary goal has been removed. Both email alternatives end with **Current Account Stats** for `jhusebachz` and `JorbisBTW`, including total level, total XP, and every skill's level and XP. These are the exact stats captured by that automation run, with its saved timestamp; the app reads the same raw snapshot. Missing or unranked values are marked unavailable rather than replaced with prior stats.
 
@@ -15,15 +17,10 @@ This project pulls fresh hiscores from the official OSRS hiscore API, compares t
 - Fetches official hiscore data for your account and tracked friends
 - Saves the latest snapshot to [`data/last_stats.json`](./data/last_stats.json)
 - Calculates day-over-day XP gains from the last saved snapshot
-- Tracks progress against three personal goals:
-  - Base 92s with Runecrafting at 90 by RuneFest
-  - Total level `2250` by RuneFest
-  - Max cape by your 33rd birthday
-- Projects goal pace from expected hourly XP rates instead of sample daily gain assumptions
-- Treats Slayer-trained combat skills as accounted-for zero-hour progress instead of manual-estimate gaps
-- Uses only On track, Tight, and Off track pace statuses in the daily report
-- Measures actual goal progress from a fixed `2026-03-25` baseline
-- Draws pace-check bars so each goal shows actual progress versus where the account should be by today
+- Tracks all-99 XP progress and cumulative estimated training hours ahead/behind the December 31, 2027 deadline
+- Tracks JorbisBTW through progressively higher base-level milestones without XP/hour assumptions
+- Retains the nearly completed Base 92s (Runecrafting 90) checklist until completed
+- Excludes Slayer-trained combat skills from timed pace calculations, while still showing their levels and XP
 - Sends a styled HTML email summary
 - Uses a GitHub Actions workflow to run automatically on a schedule
 
@@ -40,6 +37,8 @@ This repository is the source of truth for the live OSRS snapshot data used else
 .
 |-- .github/workflows/daily.yml   # Scheduled GitHub Actions workflow
 |-- boss_progression.py           # Boss ladder, KC deltas, and weekly raid goal
+|-- max_pace.py                   # Fixed-baseline cumulative maxing hours and email card
+|-- ironman_milestones.py         # Automatic Ironman base-level ladder
 |-- data/last_stats.json          # Latest saved hiscore snapshot
 |-- main.py                       # Tracker, goal logic, and email generation
 |-- run_current.py                # Current roster and goal configuration entrypoint
@@ -126,7 +125,7 @@ Boss KC is fetched by activity name from Jagex's official JSON HiScores endpoint
 
 The active friend roster in `run_current.py` is `3Sixteen`, `beefmissle13`,
 `kingxdabber`, `hedith`, `TooClose42`, `HB_Reborn`, `Dummyhead38`, `RebelMontana`,
-and `Kriid`. Their skill XP and boss KC snapshots feed both the daily email and
+`Kriid`, and `IronXDabber`. Their skill XP and boss KC snapshots feed both the daily email and
 Lil Johnny. A new friend's first snapshot establishes a baseline; later runs
 report gains from that baseline instead of counting historical progress as new.
 
@@ -181,18 +180,9 @@ python run_current.py
 
 ## Personal Goals Tracked
 
-The script currently measures progress against:
+The active main-account target is all 24 skills at 99 by **December 31, 2027**. The hours clock begins from the saved November 10, 2026 snapshot, with the baseline pinned in [`max_pace.py`](./max_pace.py) and the user's configurable XP/hour estimates in [`main.py`](./main.py). For example, completing 108 estimated training hours when the date calls for 100 means **8.0 cumulative hours ahead**, regardless of the last week's playing pace. Combat levels have no hourly timeline. The Base 92s checklist automatically disappears from the scheduled email once complete.
 
-- `Base 92s` with `Runecrafting 90` by `2026-10-03`
-- `Total level 2250` by `2026-10-03`
-- `Max cape` by `2027-03-15`
-
-Those values are defined directly in [`main.py`](./main.py), so the repo can be adjusted later if the goals or deadlines change.
-
-The daily report now evaluates each goal in two ways:
-
-- estimated grind hours remaining based on expected hourly XP rates, including Slayer-trained combat skills that are intentionally treated as zero-hour side progress
-- actual progress since `2026-03-25` compared with the pace required to hit the deadline
+The Ironman goal automatically advances only after all 24 skill levels meet the current threshold. It does not project hours or deadlines. Missing skill data cannot be treated as a completed milestone.
 
 ## Notes
 

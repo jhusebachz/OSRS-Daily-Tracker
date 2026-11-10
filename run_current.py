@@ -24,6 +24,7 @@ tracker.FRIENDS = [
     "Dummyhead38",
     "RebelMontana",
     "Kriid",
+    "IronXDabber",
 ]
 
 # Base 92s remains the dated skill goal.
@@ -97,7 +98,7 @@ def build_current_week_summary_with_raids(
         last_seven_days_summary,
     )
 
-    player_order = [tracker.USERNAME, *tracker.IRONMAN_ACCOUNTS, *tracker.FRIENDS]
+    player_order = list(dict.fromkeys([tracker.USERNAME, *tracker.IRONMAN_ACCOUNTS, *tracker.FRIENDS]))
     resolved_bosses: dict[str, dict[str, int]] = {}
 
     for player in player_order:
@@ -168,11 +169,24 @@ def build_snapshot_metadata_with_bosses(
 tracker.build_snapshot_metadata = build_snapshot_metadata_with_bosses
 
 
-_original_goal_one_html = tracker.goal_one_html
-
-
 def goal_one_html_year_end(stats: dict, gains: dict) -> str:
-    return _original_goal_one_html(stats, gains).replace("RuneFest", "Year End")
+    if any(skill not in stats or stats[skill].get("level", -1) < 1 for skill in tracker.SKILLS):
+        return tracker.section("Finish Base 92s (Runecrafting 90)", "<p>Complete skill HiScores unavailable.</p>")
+    remaining = [
+        (skill, stats[skill]["level"], tracker.goal_one_target_level(skill))
+        for skill in tracker.SKILLS
+        if skill in stats and stats[skill]["level"] < tracker.goal_one_target_level(skill)
+    ]
+    if not remaining:
+        return ""  # Finished milestone retires automatically from the daily email.
+    content = (
+        '<table width="100%" cellpadding="0" cellspacing="0">'
+        + tracker.row("Skills at goal", f'{len(tracker.SKILLS) - len(remaining)}/{len(tracker.SKILLS)}')
+        + '</table>'
+    )
+    for skill, level, target in remaining:
+        content += f'<div style="font-size:12px;padding:4px 0;">{tracker.format_skill_name(skill)} Lv{level}/{target}</div>'
+    return tracker.section("Finish Base 92s (Runecrafting 90)", content)
 
 
 tracker.goal_one_html = goal_one_html_year_end
@@ -202,6 +216,7 @@ def build_plain_text_with_boss_activity(
     last_seven_days_summary: dict,
     current_week_summary: dict,
     ironman_report: dict | None = None,
+    your_stats: dict | None = None,
 ) -> str:
     report = _original_build_plain_text(
         your_gains,
@@ -211,6 +226,7 @@ def build_plain_text_with_boss_activity(
         last_seven_days_summary,
         current_week_summary,
         ironman_report,
+        your_stats=your_stats,
     )
     top_players = _latest_daily_boss_activity.get("topPlayers", [])
     if not top_players:
@@ -233,6 +249,10 @@ tracker.build_plain_text = build_plain_text_with_boss_activity
 
 
 def current_coaching_html(stats: dict) -> str:
+    from max_pace import build_summary
+
+    max_summary = build_summary(tracker, stats)
+    ahead = max_summary.get("hoursAhead", 0)
     base_remaining = [
         skill
         for skill in tracker.SKILLS
@@ -244,6 +264,11 @@ def current_coaching_html(stats: dict) -> str:
     raid_done = int(_latest_raid_goal.get("completed", 0)) >= int(_latest_raid_goal.get("target", 1))
 
     paragraphs = [
+        (
+            f'Max Cape timed grind: <b>{abs(ahead):.1f} cumulative hours '
+            f'{"ahead" if ahead >= 0 else "behind"}</b> the December 31, 2027 plan. '
+            "Combat levels are tracked without an hourly target."
+        ),
         (
             f'Base 92s: <b>{len(tracker.SKILLS) - len(base_remaining)}/{len(tracker.SKILLS)} skills at target</b>. '
             + (

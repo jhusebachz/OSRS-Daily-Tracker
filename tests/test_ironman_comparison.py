@@ -79,12 +79,14 @@ class IronmanComparisonTests(unittest.TestCase):
         result = comparison.build_comparison(tracker, {name: player(900, 49) for name in tracker.IRONMAN_ACCOUNTS}, self.previous, END)
         self.assertTrue(all(account["gainedXp"] == 0 and account["gainedLevels"] == 0 for account in result["accounts"]))
 
-    def test_published_result_is_used_verbatim_in_both_email_formats(self):
+    def test_pair_rivalry_is_not_in_the_new_daily_email(self):
         result = comparison.build_comparison(tracker, self.old, self.previous, END)
         html = tracker.build_html_email({}, tracker.GOAL_PROGRESS_BASELINE, self.old, {}, {}, {}, {}, result)
         plain = tracker.build_plain_text({}, self.old, {}, {}, {}, {}, result)
-        self.assertIn(comparison.period_label(result), html)
-        self.assertIn(comparison.period_label(result), plain)
+        self.assertNotIn(comparison.period_label(result), html)
+        self.assertNotIn(comparison.period_label(result), plain)
+        self.assertIn("Ironman Milestones", html)
+        self.assertIn("IRONMAN MILESTONES", plain)
 
 
 if __name__ == "__main__":
